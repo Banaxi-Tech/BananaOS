@@ -21,7 +21,7 @@ bananaos.bin: $(OBJS) linker.ld
 
 bananaos.img: bananaos.bin
 	mkdir -p isodir/boot/grub
-	cp vibeos.bin isodir/boot/bananaos.bin
+	cp bananaos.bin isodir/boot/bananaos.bin
 	cp bg.bmp isodir/boot/bg.bmp
 	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
