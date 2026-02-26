@@ -75,7 +75,7 @@ sudo apt install -y qemu-system
     ```bash
     make
     ```
-    This command compiles all C and assembly source files, links them into `bananaos.bin, and then uses `grub-mkrescue` to create a bootable ISO image `bananaos.img`. This `.img` file is essentially an ISO image and can be renamed to `vibeos.iso` if preferred. The `bg.bmp` file is included in the ISO as the default wallpaper module.
+### This Command Compiles BananaOS This `.img` file is essentially an ISO image and can be renamed to `bananaos.iso` if preferred.
 
 ### Running BananaOS in QEMU
 After a successful build, you can run BananaOS using QEMU:
