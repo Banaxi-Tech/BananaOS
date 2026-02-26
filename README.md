@@ -1,7 +1,7 @@
 # BananaOS
 
 > [!CAUTION]
-> BananaOS is currently in active development and is considered highly unstable. It is **NOT recommended** to boot or run this operating system on real hardware. Doing so may lead to data loss, system corruption, or other unexpected issues. The developers are not responsible for any damages that may occur from attempting to run BananaOS on physical devices. Please use emulators (like QEMU) for testing and development purposes only.
+> BananaOS is currently in active development and is considered unstable. It is **NOT recommended** to boot or run this operating system on real hardware. Doing so may lead to data loss, system corruption, or other unexpected issues. The developers are not responsible for any damages that may occur from attempting to run BananaOS on physical devices. Please use emulators (like QEMU) for testing and development purposes only.
 
 ## Overview
 BananaOS is one of the first Vibecoded Operating System Projects, designed for learning and exploration of low-level system programming. It features a custom kernel, a graphical user interface with a window manager, a dock, and several integrated applications. BananaOS is Multiboot compliant and utilizes VESA framebuffer for graphics output.
