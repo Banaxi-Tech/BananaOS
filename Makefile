@@ -30,7 +30,7 @@ bananaos.img: bananaos.bin
 	echo '	module /boot/bg.bmp' >> isodir/boot/grub/grub.cfg
 	echo '	boot' >> isodir/boot/grub/grub.cfg
 	echo '}' >> isodir/boot/grub/grub.cfg
-	grub-mkrescue -o vibeos.img isodir
+	grub-mkrescue -o bananaos.img isodir
 
 clean:
-	rm -rf *.o vibeos.bin isodir vibeos.img
+	rm -rf *.o bananaos.bin isodir bananaos.img
