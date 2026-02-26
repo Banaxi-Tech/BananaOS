@@ -8,7 +8,7 @@ LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
 OBJS = boot.o kernel.o mouse.o calc.o notepad.o settings.o disk.o fat16.o fat32.o explorer.o dialog.o terminal.o pci.o ahci.o
 
-all: vibeos.img
+all: bananaos.img
 
 boot.o: boot.s
 	$(AS) $(ASFLAGS) $< -o $@
@@ -16,12 +16,12 @@ boot.o: boot.s
 %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
-vibeos.bin: $(OBJS) linker.ld
+bananaos.bin: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
-vibeos.img: vibeos.bin
+bananaos.img: bananaos.bin
 	mkdir -p isodir/boot/grub
-	cp vibeos.bin isodir/boot/vibeos.bin
+	cp vibeos.bin isodir/boot/bananaos.bin
 	cp bg.bmp isodir/boot/bg.bmp
 	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
