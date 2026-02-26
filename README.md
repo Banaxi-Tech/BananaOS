@@ -58,7 +58,7 @@ To build and run BananaOS, you will need a Debian-based Linux system (such as Ub
 
 First, install the necessary build tools:
 ```bash
-sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso
+sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso mtools
 ```
 For running BananaOS, you will also need QEMU:
 ```bash
