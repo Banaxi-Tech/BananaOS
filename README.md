@@ -1,11 +1,10 @@
 # BananaOS
 
-**⚠️ WARNING: Highly Unstable Development OS ⚠️**
-
-BananaOS is currently in active development and is considered highly unstable. It is **NOT recommended** to boot or run this operating system on real hardware. Doing so may lead to data loss, system corruption, or other unexpected issues. The developers are not responsible for any damages that may occur from attempting to run BananaOS on physical devices. Please use emulators (like QEMU) for testing and development purposes only.
+> [!CAUTION]
+> BananaOS is currently in active development and is considered highly unstable. It is **NOT recommended** to boot or run this operating system on real hardware. Doing so may lead to data loss, system corruption, or other unexpected issues. The developers are not responsible for any damages that may occur from attempting to run BananaOS on physical devices. Please use emulators (like QEMU) for testing and development purposes only.
 
 ## Overview
-BananaOS is a 32-bit hobby operating system project, designed for learning and exploration of low-level system programming. It features a custom kernel, a graphical user interface with a window manager, a dock, and several integrated applications. BananaOS is Multiboot compliant and utilizes VESA framebuffer for graphics output.
+BananaOS is one of the first Vibecoded Operating System Projects, designed for learning and exploration of low-level system programming. It features a custom kernel, a graphical user interface with a window manager, a dock, and several integrated applications. BananaOS is Multiboot compliant and utilizes VESA framebuffer for graphics output.
 
 ## Architecture Support
 
@@ -24,7 +23,6 @@ To run BananaOS, your system or virtual machine should meet the following specif
 | :-------------------- | :-------------------------- | :-------------------------------- |
 | **Processor**         | Intel 486                   | Intel Pentium 2 or equivalent     |
 | **RAM**               | 11.2 MB                     | 128 MB                            |
-| **Graphics**          | VESA-compatible Framebuffer | VESA-compatible Framebuffer       |
 | **Boot Method**       | BIOS                        | BIOS                              |
 
 ## Features
@@ -64,54 +62,43 @@ sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutil
 ```
 For running BananaOS, you will also need QEMU:
 ```bash
-sudo apt install -y qemu-system-i386
+sudo apt install -y qemu-system
 ```
 
 ### Building BananaOS
 1.  Clone the repository:
     ```bash
-    git clone [YOUR_REPOSITORY_URL]
-    cd VibeOS
+    git clone https://github.com/Banaxi-Tech/BananaOS
+    cd BananaOS
     ```
 2.  Build the OS:
     ```bash
     make
     ```
-    This command compiles all C and assembly source files, links them into `vibeos.bin`, and then uses `grub-mkrescue` to create a bootable ISO image `vibeos.img`. This `.img` file is essentially an ISO image and can be renamed to `vibeos.iso` if preferred. The `bg.bmp` file is included in the ISO as the default wallpaper module.
+    This command compiles all C and assembly source files, links them into `bananaos.bin, and then uses `grub-mkrescue` to create a bootable ISO image `bananaos.img`. This `.img` file is essentially an ISO image and can be renamed to `vibeos.iso` if preferred. The `bg.bmp` file is included in the ISO as the default wallpaper module.
 
 ### Running BananaOS in QEMU
 After a successful build, you can run BananaOS using QEMU:
 ```bash
-qemu-system-i386 -fda vibeos.img -m 128
+qemu-system-i386 -cdrom bananaos.img -m 128M
 ```
-*(Note: `-m 128` allocates 128MB of RAM to the VM. Adjust as needed. For testing AHCI/SATA, you might need to attach a disk image, e.g., `-drive file=disk.img,format=raw,if=pflash`)*
+### Running BananaOS in QEMU With a 486
+After the successful build run
+```bash
+qemu-system-i386 -cpu 486 -cdrom bananaos.img -m 11.2M
+```
 
 ## Technologies Used
 *   **GCC**: C Compiler
 *   **NASM**: Assembler
-*   **GNU GRUB**: Bootloader and ISO creation (`grub-mkrescue`)
+*   **GNU GRUB**: Bootloader and ISO creation
 *   **QEMU**: System Emulator
 
-## Directory Structure
-*   `boot.s`: Assembly bootloader code.
-*   `kernel.c`: Main kernel entry point and core functionalities.
-*   `*.c`, `*.h`: C source and header files for various modules (e.g., `mouse.c`, `calc.c`, `ahci.c`, `pci.c`, `fat16.c`, `fat32.c`, `explorer.c`, `dialog.c`, `terminal.c`, `settings.c`).
-*   `linker.ld`: Linker script for positioning code and data.
-*   `Makefile`: Build automation script.
-*   `isodir/`: Temporary directory created during the build process to stage files for the ISO image. Contains `boot/grub/grub.cfg` and `boot/vibeos.bin`, `boot/bg.bmp`.
-*   `vibeos.bin`: The compiled kernel executable.
-*   `vibeos.img`: The final bootable ISO image.
-*   `create_disk.sh`, `create_fat32_disk.sh`: Utility scripts for creating disk images for use with the OS.
-*   `bg.bmp`: Default wallpaper image.
-
-## Screenshots
-*(Consider adding screenshots of BananaOS running here to showcase its GUI!)*
 
 ## Contributing
 Contributions are welcome! Please feel free to open issues or submit pull requests.
 
-## License
-*(Please specify your license here, e.g., MIT, GPL, etc. If unsure, the MIT License is a common and permissive choice.)*
+
 
 ## Contact
 For questions or feedback, please open an issue on GitHub.
