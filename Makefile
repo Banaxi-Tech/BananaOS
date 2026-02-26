@@ -26,7 +26,7 @@ bananaos.img: bananaos.bin
 	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "BananaOS" {' >> isodir/boot/grub/grub.cfg
-	echo '	multiboot /boot/vibeos.bin' >> isodir/boot/grub/grub.cfg
+	echo '	multiboot /boot/bananaos.bin' >> isodir/boot/grub/grub.cfg
 	echo '	module /boot/bg.bmp' >> isodir/boot/grub/grub.cfg
 	echo '	boot' >> isodir/boot/grub/grub.cfg
 	echo '}' >> isodir/boot/grub/grub.cfg
