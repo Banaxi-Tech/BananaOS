@@ -55,7 +55,7 @@ To run BananaOS, your system or virtual machine should meet the following specif
     *   AHCI (Advanced Host Controller Interface) driver for SATA storage devices.
     *   PCI (Peripheral Component Interconnect) bus enumeration.
 *   **Memory Management**: Basic physical memory detection and backbuffer allocation strategy based on available RAM. Includes checks for minimum memory requirements.
-*   **CPU Feature Emulation**: Includes an Interrupt Service Routine (ISR) to emulate CMOV (Conditional Move) instructions for older CPUs or specific emulator configurations, ensuring broader compatibility.
+* **486 Retro-Compatibility**: Includes an ISR to emulate CMOV instructions, allowing the OS to boot on original Intel 486 hardware.
 
 ## Getting Started
 
