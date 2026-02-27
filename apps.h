@@ -66,6 +66,7 @@ void draw_settings();
 void get_cpu_info();
 
 // Dialog
+extern int acpi_supported;
 extern char system_version[];
 extern char system_build[];
 extern int dialog_mode;

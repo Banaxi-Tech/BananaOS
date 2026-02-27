@@ -5,6 +5,16 @@
 #include "ahci.h"
 #include "pci.h"
 
+
+// ===== Forward Declarations =====
+void kstrcpy(char* dest, const char* src);
+
+void acpi_shutdown();
+void safe_power_message();
+void reboot_system();
+
+static inline void outw(uint16_t port, uint16_t val);
+
 // --- I/O Ports ---
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ( "outb %0, %1" : : "a"(val), "Nd"(port) );
@@ -57,7 +67,7 @@ struct multiboot_mod_list {
 
 
 
-
+int acpi_supported = 0;
 void* wallpaper_ptr = NULL;
 
 // --- VESA Graphics ---
@@ -87,6 +97,21 @@ void draw_rect(int x, int y, int w, int h, uint32_t color) {
             draw_pixel(x + j, y + i, color);
         }
     }
+}
+
+int detect_acpi() {
+    char* rsdp;
+
+    // Search EBDA (0x000E0000 - 0x000FFFFF)
+    for (rsdp = (char*)0x000E0000; rsdp < (char*)0x00100000; rsdp += 16) {
+        if (rsdp[0] == 'R' && rsdp[1] == 'S' && rsdp[2] == 'D' &&
+            rsdp[3] == ' ' && rsdp[4] == 'P' && rsdp[5] == 'T' &&
+            rsdp[6] == 'R' && rsdp[7] == ' ') {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 void draw_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
@@ -316,8 +341,8 @@ void itoa(int val, char* buf) {
 int topbar_menu_open = 0;
 
 int dialog_mode = 0;
-char system_version[] = "1.1";
-char system_build[] = "Build 106";
+char system_version[] = "1.1.1";
+char system_build[] = "Build 109";
 int mouse_x = 512;
 int mouse_y = 384;
 uint8_t mouse_cycle = 0;
@@ -442,8 +467,40 @@ if (mouse_y >= 0 && mouse_y <= 25) {
         int menu_x = 10;
         int menu_y = 25;
 
+        // About
         if (mouse_x >= menu_x && mouse_x <= menu_x + 170 &&
             mouse_y >= menu_y && mouse_y <= menu_y + 30) {
+
+            topbar_menu_open = 0;
+            dialog_mode = 1;
+            kstrcpy(win_dialog.title, "About BananaOS");
+            win_dialog.open = 1;
+            force_render_frame = 1;
+            return;
+        }
+
+        // Shutdown
+        if (mouse_x >= menu_x && mouse_x <= menu_x + 170 &&
+            mouse_y >= menu_y + 30 && mouse_y <= menu_y + 60) {
+
+            topbar_menu_open = 0;
+
+            if (acpi_supported)
+                acpi_shutdown();
+            else
+                safe_power_message();
+
+            return;
+        }
+
+        // Reboot
+        if (mouse_x >= menu_x && mouse_x <= menu_x + 170 &&
+            mouse_y >= menu_y + 60 && mouse_y <= menu_y + 90) {
+
+            topbar_menu_open = 0;
+            reboot_system();
+            return;
+        }
 
         topbar_menu_open = 0;
 
@@ -458,7 +515,6 @@ if (mouse_y >= 0 && mouse_y <= 25) {
         force_render_frame = 1;
         return;
     }
-}
     // 2. Dock Checks
     int hover_idx = get_dock_hover_index();
     if (hover_idx == 0) { 
@@ -759,12 +815,14 @@ void draw_topbar() {
         int menu_x = 10;
         int menu_y = 25;
         int menu_w = 170;
-        int menu_h = 30;
+        int menu_h = 90;
 
         draw_rect_alpha(menu_x, menu_y, menu_w, menu_h, 0x2E2E2E, 230);
         draw_rect(menu_x, menu_y, menu_w, 1, 0x888888);
 
         draw_string("About BananaOS", menu_x + 10, menu_y + 10, 0xFFFFFF);
+        draw_string("Shutdown", menu_x + 10, menu_y + 35, 0xFFFFFF);
+        draw_string("Reboot", menu_x + 10, menu_y + 60, 0xFFFFFF);
     }
 }
 
@@ -965,6 +1023,28 @@ void idt_install() {
     idt_set_gate(6, (uint32_t)as_isr6, 0x08, 0x8E);
 }
 
+void acpi_shutdown() {
+    if (!acpi_supported) return;
+
+    // Standard ACPI poweroff (works in QEMU/Bochs/VirtualBox)
+    outw(0x604, 0x2000);
+
+    // Fallback
+    while (1) asm("hlt");
+}
+
+static inline void outw(uint16_t port, uint16_t val) {
+    asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
+}
+
+
+void safe_power_message() {
+    draw_rect(0, 0, scr_width, scr_height, 0x000000);
+    draw_string("It is now safe to turn off your computer.", 40, 40, 0xFFFFFF);
+    swap_buffers();
+    while (1) asm("hlt");
+}
+
 // --- PS/2 Input Handling ---
 void poll_ps2() {
     uint8_t status = inb(0x64);
@@ -1029,6 +1109,23 @@ void poll_ps2() {
         status = inb(0x64); 
     }
 }
+// Implemented in Build 107
+void reboot_system() {
+
+    // Try ACPI reset first
+    if (acpi_supported) {
+        outb(0xCF9, 0x06);
+    }
+
+    // Fallback: keyboard controller reset
+    uint8_t good = 0x02;
+    while (good & 0x02)
+        good = inb(0x64);
+
+    outb(0x64, 0xFE);
+
+    while (1) asm("hlt");
+}
 
 extern void mouse_install();
 void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
@@ -1038,6 +1135,7 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     idt_install();
     mouse_install();
     ahci_init();
+    acpi_supported = detect_acpi();
     
     uint32_t highest_mod_end = 0x400000; 
     int has_wallpaper = 0;
