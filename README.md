@@ -80,7 +80,7 @@ When its done the BananaOS folder should be at your desktop inside it there will
 ### Manual Build
 First, install the necessary build tools:
 ```bash
-sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso mtools
+sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso mtools git
 ```
 For running BananaOS, you will also need QEMU:
 ```bash
