@@ -4,6 +4,12 @@
 > BananaOS is currently in active development and is considered unstable. It is **NOT recommended** to boot or run this operating system on real hardware. Doing so may lead to data loss, system corruption, or other unexpected issues. The developers are not responsible for any damages that may occur from attempting to run BananaOS on physical devices. Please use emulators (like QEMU) for testing and development purposes only.
 
 ## Overview
+
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Banaxi-Tech/BananaOS/refs/heads/main/In%20Vmware.png" alt="BananaOS Desktop" width="800">
+</p>
+
 BananaOS is one of the first Vibecoded Operating System Projects, designed for learning and exploration of low-level system programming. It features a custom kernel, a graphical user interface with a window manager, a dock, and several integrated applications. BananaOS is Multiboot compliant and utilizes VESA framebuffer for graphics output.
 
 ## Architecture Support
@@ -56,6 +62,18 @@ To run BananaOS, your system or virtual machine should meet the following specif
 ### Prerequisites
 To build and run BananaOS, you will need a Debian-based Linux system (such as Ubuntu, Debian, or WSL2).
 
+
+You can either use the easy build script or the manual build if you plan to change the code
+
+### Easy Build
+
+Open your terminal and paste this into it
+```bash
+curl -sSL https://raw.githubusercontent.com/Banaxi-Tech/BananaOS/refs/heads/main/easy_build.sh | bash
+```
+When its done the BananaOS folder should be at your desktop inside it there will be a bananaos.iso
+
+### Manual Build
 First, install the necessary build tools:
 ```bash
 sudo apt update && sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso mtools
