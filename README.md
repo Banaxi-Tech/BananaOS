@@ -93,7 +93,7 @@ sudo apt install -y qemu-system
     ```bash
     make
     ```
-### This Command Compiles BananaOS This `.img` file is essentially an ISO image and can be renamed to `bananaos.iso` if preferred.
+Note: The make command compiles the source into a bananaos.img file. This is a hybrid image that can be used as an ISO; you can rename it to bananaos.iso if your emulator requires it.
 
 ### Running BananaOS in QEMU
 After a successful build, you can run BananaOS using QEMU:
