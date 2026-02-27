@@ -23,6 +23,7 @@ void draw_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha);
 void draw_rounded_rect_alpha(int x, int y, int w, int h, int r, uint32_t color, uint8_t alpha);
 void draw_char(char c, int x, int y, uint32_t fg_color);
 void draw_string(const char* str, int x, int y, uint32_t fg);
+void draw_topbar();
 void itoa(int val, char* buf);
 
 uint32_t get_window_color();
@@ -65,6 +66,9 @@ void draw_settings();
 void get_cpu_info();
 
 // Dialog
+extern char system_version[];
+extern char system_build[];
+extern int dialog_mode;
 extern Window win_dialog;
 void draw_dialog();
 

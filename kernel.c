@@ -55,6 +55,9 @@ struct multiboot_mod_list {
     uint32_t pad;
 };
 
+
+
+
 void* wallpaper_ptr = NULL;
 
 // --- VESA Graphics ---
@@ -64,6 +67,7 @@ uint32_t scr_width = 1024;
 uint32_t scr_height = 768;
 uint32_t pitch = 0;
 uint8_t bpp = 32;
+
 
 void draw_pixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)scr_width || y < 0 || y >= (int)scr_height || !backbuffer) return;
@@ -263,6 +267,38 @@ void draw_string(const char* str, int x, int y, uint32_t fg) {
     }
 }
 
+uint8_t read_cmos(uint8_t reg) {
+    outb(0x70, reg);
+    return inb(0x71);
+}
+
+int is_updating_rtc() {
+    outb(0x70, 0x0A);
+    return (inb(0x71) & 0x80);
+}
+
+void get_rtc_time(int* h, int* m, int* s) {
+    while (is_updating_rtc());
+
+    *s = read_cmos(0x00);
+    *m = read_cmos(0x02);
+    *h = read_cmos(0x04);
+
+    uint8_t registerB = read_cmos(0x0B);
+
+    // Convert BCD to binary if necessary
+    if (!(registerB & 0x04)) {
+        *s = (*s & 0x0F) + ((*s / 16) * 10);
+        *m = (*m & 0x0F) + ((*m / 16) * 10);
+        *h = ((*h & 0x0F) + (((*h & 0x70) / 16) * 10)) | (*h & 0x80);
+    }
+
+    // Convert 12h to 24h if necessary
+    if (!(registerB & 0x02) && (*h & 0x80)) {
+        *h = ((*h & 0x7F) + 12) % 24;
+    }
+}
+
 void itoa(int val, char* buf) {
     if (val == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
     int i = 0;
@@ -277,6 +313,11 @@ void itoa(int val, char* buf) {
 }
 
 // --- App State (moved to apps.h/individual files) ---
+int topbar_menu_open = 0;
+
+int dialog_mode = 0;
+char system_version[] = "1.1";
+char system_build[] = "Build 106";
 int mouse_x = 512;
 int mouse_y = 384;
 uint8_t mouse_cycle = 0;
@@ -385,6 +426,39 @@ void check_click() {
     }
     last_click_tick = timer_ticks;
 
+
+    // --- Topbar BananaOS menu ---
+if (mouse_y >= 0 && mouse_y <= 25) {
+    // BananaOS text hitbox (approximate width 80px)
+    if (mouse_x >= 10 && mouse_x <= 100) {
+        topbar_menu_open = !topbar_menu_open;
+        force_render_frame = 1;
+        return;
+    }
+    }
+
+    // --- About click inside dropdown ---
+    if (topbar_menu_open) {
+        int menu_x = 10;
+        int menu_y = 25;
+
+        if (mouse_x >= menu_x && mouse_x <= menu_x + 170 &&
+            mouse_y >= menu_y && mouse_y <= menu_y + 30) {
+
+        topbar_menu_open = 0;
+
+        dialog_mode = 1;
+        kstrcpy(win_dialog.title, "About BananaOS");
+        win_dialog.open = 1;
+        win_dialog.w = 400;
+        win_dialog.h = 220;
+        win_dialog.x = (scr_width - 400) / 2;
+        win_dialog.y = (scr_height - 220) / 2;
+
+        force_render_frame = 1;
+        return;
+    }
+}
     // 2. Dock Checks
     int hover_idx = get_dock_hover_index();
     if (hover_idx == 0) { 
@@ -563,6 +637,15 @@ void draw_pixel_fb(int x, int y, uint32_t color) {
     *(uint32_t*)((uint8_t*)fb + offset) = color;
 }
 
+
+
+void kstrcpy(char* dest, const char* src) {
+    while (*src) {
+        *dest++ = *src++;
+    }
+    *dest = '\0';
+}
+
 void draw_cursor_direct(int x, int y) {
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
@@ -615,6 +698,73 @@ void draw_dock() {
         draw_rect(bx, by + y_offset, size, size, colors[i]);
         uint32_t fg = (colors[i] == 0xFFFFFF) ? 0x000000 : 0xFFFFFF;
         draw_string(labels[i], bx + (size/2) - 4, by + y_offset + (size/2) - 4, fg);
+    }
+}
+
+static inline uint32_t blur_pixel(uint32_t a, uint32_t b, uint32_t c,
+                                  uint32_t d, uint32_t e) {
+    uint32_t r = ((a>>16&255)+(b>>16&255)+(c>>16&255)+(d>>16&255)+(e>>16&255))/5;
+    uint32_t g = ((a>>8&255)+(b>>8&255)+(c>>8&255)+(d>>8&255)+(e>>8&255))/5;
+    uint32_t b2= ((a&255)+(b&255)+(c&255)+(d&255)+(e&255))/5;
+    return (r<<16)|(g<<8)|b2;
+}
+
+void blur_rect(int x, int y, int w, int h) {
+    for (int j = y+1; j < y+h-1; j++) {
+        for (int i = x+1; i < x+w-1; i++) {
+            uint32_t* p = (uint32_t*)(backbuffer + j*pitch + i*4);
+
+            uint32_t up    = *(uint32_t*)(backbuffer + (j-1)*pitch + i*4);
+            uint32_t down  = *(uint32_t*)(backbuffer + (j+1)*pitch + i*4);
+            uint32_t left  = *(uint32_t*)(backbuffer + j*pitch + (i-1)*4);
+            uint32_t right = *(uint32_t*)(backbuffer + j*pitch + (i+1)*4);
+            uint32_t mid   = *p;
+
+            *p = blur_pixel(up, down, left, right, mid);
+        }
+    }
+}
+
+void draw_topbar() {
+    int bar_h = 25;
+
+    // Blur what is already rendered
+    blur_rect(0, 0, scr_width, bar_h);
+
+    // Subtle glass tint (optional)
+    draw_rect_alpha(0, 0, scr_width, bar_h, 0xFFFFFF, 40);
+
+    // Bottom divider
+    draw_rect(0, bar_h - 1, scr_width, 1, 0x888888);
+
+    // Left label
+    draw_string("BananaOS", 10, 6, 0xFFFFFF);
+
+    // Clock
+    int h, m, s;
+    get_rtc_time(&h, &m, &s);
+
+    char time_str[6];
+    time_str[0] = (h / 10) + '0';
+    time_str[1] = (h % 10) + '0';
+    time_str[2] = ':';
+    time_str[3] = (m / 10) + '0';
+    time_str[4] = (m % 10) + '0';
+    time_str[5] = '\0';
+
+    draw_string(time_str, scr_width - 50, 6, 0xFFFFFF);
+    
+    // --- BananaOS Dropdown Menu ---
+    if (topbar_menu_open) {
+        int menu_x = 10;
+        int menu_y = 25;
+        int menu_w = 170;
+        int menu_h = 30;
+
+        draw_rect_alpha(menu_x, menu_y, menu_w, menu_h, 0x2E2E2E, 230);
+        draw_rect(menu_x, menu_y, menu_w, 1, 0x888888);
+
+        draw_string("About BananaOS", menu_x + 10, menu_y + 10, 0xFFFFFF);
     }
 }
 
@@ -956,6 +1106,8 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     }
 
     if (total_ram_mb < 64) {
+        dialog_mode = 0;
+        kstrcpy(win_dialog.title, "System Warning");
         win_dialog.open = 1;
     }
 
@@ -1001,6 +1153,17 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
                 }
             }
         }
+
+        static int last_sec = -1;
+
+        if (timer_ticks % 60 == 0) {
+            int h, m, s;
+            get_rtc_time(&h, &m, &s);
+            if (s != last_sec) {
+                force_render_frame = 1;
+                last_sec = s;
+               }
+        }
         
         if (force_render_frame) {
             // Full 8MB rendering pipeline triggered by UI changes
@@ -1012,6 +1175,7 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
             draw_terminal();
             draw_dialog();
             draw_dock(); 
+            draw_topbar();
             
             swap_buffers();
             
