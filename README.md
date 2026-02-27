@@ -71,6 +71,10 @@ Open your terminal and paste this into it
 ```bash
 curl -sSL https://raw.githubusercontent.com/Banaxi-Tech/BananaOS/refs/heads/main/easy_build.sh | bash
 ```
+
+View Source Easy Build Script Source: [Link](https://raw.githubusercontent.com/Banaxi-Tech/BananaOS/refs/heads/main/easy_build.sh)
+
+
 When its done the BananaOS folder should be at your desktop inside it there will be a bananaos.iso
 
 ### Manual Build
