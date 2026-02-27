@@ -1,0 +1,34 @@
+name: Build BananaOS
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential nasm gcc-multilib binutils \
+                           grub-common grub-pc-bin xorriso mtools
+
+    # This runs your 'make clean' then 'make' to build the OS
+    - name: Compile OS
+      run: |
+        make clean
+        make
+
+    # This saves the resulting .img file so you can download it
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bananaos-image
+        path: bananaos.img
