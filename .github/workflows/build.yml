@@ -2,9 +2,15 @@ name: Build BananaOS
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+      - IA32-EFI
+      - x86_64
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
+      - IA32-EFI
+      - x86_64
 
 jobs:
   build:
@@ -18,17 +24,21 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y build-essential nasm gcc-multilib binutils \
-                           grub-common grub-pc-bin xorriso mtools
+                            grub-common grub-pc-bin xorriso mtools
 
-    # This runs your 'make clean' then 'make' to build the OS
     - name: Compile OS
       run: |
         make clean
         make
 
-    # This saves the resulting .img file so you can download it
+    # This renames the generic bananaos.img to include the branch name
+    - name: Prepare Artifact Name
+      run: mv bananaos.img bananaos-${{ github.ref_name }}.img
+
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bananaos-image
-        path: bananaos.img
+        # This names the download folder in GitHub
+        name: bananaos-${{ github.ref_name }}-image
+        # This points to the newly renamed file
+        path: bananaos-${{ github.ref_name }}.img
