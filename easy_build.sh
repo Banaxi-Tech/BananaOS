@@ -19,6 +19,7 @@ sudo apt update && sudo apt install -y \
     xorriso \
     mtools \
     qemu-system
+    git \
 
 # 2. Navigate to Desktop
 echo "Moving to Desktop..."
