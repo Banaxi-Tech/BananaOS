@@ -20,6 +20,7 @@ BananaOS is being developed with support for different platforms in mind.
 | :----------------- | :------------ | :----------------------------------- |
 | i386 (BIOS Boot)   | Supported     | Primary development target.          |
 | x86_64 (EFI Boot)  | Coming Soon   | Planned for future releases.         |
+| x86_64 (BIOS Boot)  |  Planned to Release Very Soon | A Bit unstable right now.         |
 
 ## System Requirements
 
