@@ -71,6 +71,8 @@ int acpi_supported = 0;
 void* wallpaper_ptr = NULL;
 
 // --- VESA Graphics ---
+
+uint32_t cursor_backup[8 * 8];
 uint32_t* fb = NULL;          
 uint32_t* backbuffer = NULL;  
 uint32_t scr_width = 1024;
@@ -341,8 +343,8 @@ void itoa(int val, char* buf) {
 int topbar_menu_open = 0;
 
 int dialog_mode = 0;
-char system_version[] = "1.1.1";
-char system_build[] = "Build 109";
+char system_version[] = "1.2.1";
+char system_build[] = "Build 139";
 int mouse_x = 512;
 int mouse_y = 384;
 uint8_t mouse_cycle = 0;
@@ -473,7 +475,7 @@ if (mouse_y >= 0 && mouse_y <= 25) {
 
             topbar_menu_open = 0;
             dialog_mode = 1;
-            kstrcpy(win_dialog.title, "About BananaOS");
+            kstrcpy(win_dialog.title, "About BananaOS"); // Added in Build 100
             win_dialog.open = 1;
             force_render_frame = 1;
             return;
@@ -488,7 +490,7 @@ if (mouse_y >= 0 && mouse_y <= 25) {
             if (acpi_supported)
                 acpi_shutdown();
             else
-                safe_power_message();
+                safe_power_message();  // Needed
 
             return;
         }
@@ -703,15 +705,50 @@ void kstrcpy(char* dest, const char* src) {
 }
 
 void draw_cursor_direct(int x, int y) {
+
+    // Save background pixels
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+
+            int px = x + j;
+            int py = y + i;
+
+            if (px < 0 || px >= (int)scr_width ||
+                py < 0 || py >= (int)scr_height)
+                continue;
+
+            uint32_t offset = py * pitch + px * 4;
+            cursor_backup[i * 8 + j] =
+                *(uint32_t*)((uint8_t*)fb + offset);
+        }
+    }
+
+    // Draw white 8x8 cursor
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
             draw_pixel_fb(x + j, y + i, 0xFFFFFF);
         }
     }
-    draw_pixel_fb(x-1, y-1, 0x000000);
-    draw_pixel_fb(x+8, y+8, 0x000000);
 }
 
+void restore_cursor(int x, int y) {
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+
+            int px = x + j;
+            int py = y + i;
+
+            if (px < 0 || px >= (int)scr_width ||
+                py < 0 || py >= (int)scr_height)
+                continue;
+
+            uint32_t offset = py * pitch + px * 4;
+            *(uint32_t*)((uint8_t*)fb + offset) =
+                cursor_backup[i * 8 + j];
+        }
+    }
+}
 void draw_dock() {
     int dock_w = 400;
     int dock_h = 60;
@@ -1045,6 +1082,9 @@ void safe_power_message() {
     while (1) asm("hlt");
 }
 
+
+
+
 // --- PS/2 Input Handling ---
 void poll_ps2() {
     uint8_t status = inb(0x64);
@@ -1054,19 +1094,41 @@ void poll_ps2() {
         
         if (is_mouse) {
             switch(mouse_cycle) {
-                case 0:
-                    if (port_data & 0x08) { mouse_byte[0] = port_data; mouse_cycle++; }
-                    break;
+case 0:
+    if (!(port_data & 0x08)) {
+        mouse_cycle = 0;     // Needed for the Break Dump 
+        break;
+    }
+
+    mouse_byte[0] = port_data;
+    mouse_cycle++;     // I hope this wont break things
+    break;
                 case 1:
                     mouse_byte[1] = port_data; mouse_cycle++;
-                    break;
+                    break;   // Added in Build 119
                 case 2:
-                    mouse_byte[2] = port_data; mouse_cycle = 0;
-                    
-                    int dx = (int8_t)mouse_byte[1];
-                    int dy = (int8_t)mouse_byte[2];
-                    mouse_x += dx;
-                    mouse_y -= dy; 
+    mouse_byte[2] = port_data; 
+    mouse_cycle = 0;
+    // Ignore overflow packets and Continue
+    if (mouse_byte[0] & 0xC0)
+    break;
+
+int dx = (int8_t)mouse_byte[1];    // Needs to be reconfigured Soon
+int dy = (int8_t)mouse_byte[2];
+
+// Ignore tiny jitter from QEMU (deadzone)
+if (dx > -2 && dx < 2)
+    dx = 0;
+
+if (dy > -2 && dy < 2)
+    dy = 0;
+
+if (dx != 0 || dy != 0) {
+    mouse_x += dx;
+    mouse_y -= dy;
+}
+
+
                     
                     int new_btn = mouse_byte[0] & 0x01;
                     if (new_btn && !mouse_down) {
@@ -1164,38 +1226,34 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
             total_mem_bytes = 16 * 1024 * 1024; // Fallback assumption
         }
         
-        uint32_t bb_size = scr_width * scr_height * (bpp / 8);
-        uint32_t bb_addr = 0;
+uint32_t bb_size = scr_width * scr_height * (bpp / 8);
+
+// Allocate backbuffer safely after kernel/modules
+uint32_t safe_start = highest_mod_end + 0x10000; // 64KB safety gap
+
+// Align to 4KB page boundary
+safe_start = (safe_start + 0xFFF) & ~0xFFF;
+
+uint32_t bb_addr = safe_start;
+
+if (bb_addr + bb_size > total_mem_bytes) {
+    // Not enough RAM for double buffer
+    backbuffer = NULL;
+} else {
+    backbuffer = (uint32_t*)bb_addr;
+}
+
+if (!backbuffer)
+    backbuffer = fb;
+
+
+
         
-        // Priority: Smoothness over Aesthetics on low-RAM systems.
-        // If < 32MB, we ALWAYS sacrifice wallpaper to guarantee 100% stable double-buffering.
-        if (total_mem_bytes < 32 * 1024 * 1024) {
-            wallpaper_ptr = NULL;
-            // Place backbuffer at the 2.5MB mark (safely after kernel/stack/data)
-            // This allows up to a 9.5MB buffer on a 12MB machine.
-            bb_addr = 0x280000; 
-        } else {
-            // High-RAM math: place at top of memory minus 2MB safety margin
-            bb_addr = total_mem_bytes - bb_size - (2 * 1024 * 1024);
-            // Collision Check for High-RAM (ensure we don't hit modules)
-            if (bb_addr < highest_mod_end + 0x10000) {
-                 bb_addr = highest_mod_end + 0x10000;
-            }
-        }
-
-        // Final Allocation Check
-        if (bb_addr + bb_size > total_mem_bytes || bb_addr == 0) {
-            backbuffer = fb; // Safe Mode (Flickery)
-        } else {
-            backbuffer = (uint32_t*)bb_addr;
-        }
-
-        if (!backbuffer) backbuffer = fb;
     }
     
     total_ram_mb = (1024 + mbd->mem_upper) / 1024;
     
-    if (total_ram_mb < 11) {
+    if (total_ram_mb < 1) {
         // Critical System Halt
         draw_rect(0, 0, scr_width, scr_height, 0x000000);
         draw_string("Not enough Physical Memory is avaible for the OS loader or OS", 40, 40, 0xFFFFFF);
@@ -1222,15 +1280,19 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     int last_drawn_mouse_y = -1;
 
     while (1) {
-        timer_ticks++;
         poll_ps2();
         
-        // Trigger render if mouse hits a new hover target
-        int current_hover_idx = get_dock_hover_index();
-        if (current_hover_idx != last_hover_idx) {
-            force_render_frame = 1;
-            last_hover_idx = current_hover_idx;
-        }
+int current_hover_idx = get_dock_hover_index();
+
+if (current_hover_idx != last_hover_idx) {
+
+    // Only trigger full redraw if we ENTER or LEAVE a dock icon
+    if (current_hover_idx == -1 || last_hover_idx == -1) {
+        force_render_frame = 1;
+    }
+
+    last_hover_idx = current_hover_idx;
+}
 
         if (mouse_clicked) {
             check_click();
@@ -1252,16 +1314,7 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
             }
         }
 
-        static int last_sec = -1;
 
-        if (timer_ticks % 60 == 0) {
-            int h, m, s;
-            get_rtc_time(&h, &m, &s);
-            if (s != last_sec) {
-                force_render_frame = 1;
-                last_sec = s;
-               }
-        }
         
         if (force_render_frame) {
             // Full 8MB rendering pipeline triggered by UI changes
@@ -1284,21 +1337,14 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
             last_drawn_mouse_x = mouse_x;
             last_drawn_mouse_y = mouse_y;
             
-        } else if (mouse_x != last_drawn_mouse_x || mouse_y != last_drawn_mouse_y) {
-            // Mouse moved, but no UI changed! Dirty-Rectangle restore:
-            // 1. Copy the 10x10 background square from the pristine backbuffer to VRAM where the cursor *used* to be
-            swap_rect(last_drawn_mouse_x - 1, last_drawn_mouse_y - 1, 10, 10);
-            
-            // 2. Draw the new cursor straight to VRAM
-            draw_cursor_direct(mouse_x, mouse_y);
-            
-            // 3. SAFE MODE: If we have no backbuffer, we MUST force a full redraw
-            // to prevent mouse trails, as the dirty-rect restore from VRAM is impossible.
-            if (backbuffer == fb) force_render_frame = 1;
-            
-            last_drawn_mouse_x = mouse_x;
-            last_drawn_mouse_y = mouse_y;
-        }
+} else if (mouse_x != last_drawn_mouse_x || mouse_y != last_drawn_mouse_y) {
+
+restore_cursor(last_drawn_mouse_x, last_drawn_mouse_y);
+draw_cursor_direct(mouse_x, mouse_y);
+
+last_drawn_mouse_x = mouse_x;
+last_drawn_mouse_y = mouse_y;
+}
 
         // Lock rendering execution loop to simulated 60Hz VGA vblank
         // This stops the main thread from requesting 1 Million MMIO port polls per second

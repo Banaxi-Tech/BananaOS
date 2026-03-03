@@ -2,7 +2,8 @@ CC = gcc
 AS = nasm
 LD = ld
 
-CFLAGS = -m32 -ffreestanding -O2 -Wall -Wextra -c
+# ADDED -fno-stack-protector and -fno-pie to CFLAGS
+CFLAGS = -m32 -ffreestanding -fno-stack-protector -fno-pie -O2 -Wall -Wextra -c -mno-sse
 ASFLAGS = -f elf32
 LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
@@ -16,14 +17,16 @@ boot.o: boot.s
 %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
+# Fixed: The rule for bananaos.bin was missing the command line from your previous log
 bananaos.bin: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
 bananaos.img: bananaos.bin
 	mkdir -p isodir/boot/grub
 	cp bananaos.bin isodir/boot/bananaos.bin
+	# Ensure bg.bmp exists in your folder or this line will fail
 	cp bg.bmp isodir/boot/bg.bmp
-	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
+	echo 'set timeout=10' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "BananaOS" {' >> isodir/boot/grub/grub.cfg
 	echo '	multiboot /boot/bananaos.bin' >> isodir/boot/grub/grub.cfg
