@@ -29,7 +29,9 @@ To run BananaOS, your system or virtual machine should meet the following specif
 | Category              | Minimum Requirement         | Recommended Minimum               |
 | :-------------------- | :-------------------------- | :-------------------------------- |
 | **Processor**         | Intel 486                   | Intel Pentium 2 or equivalent     |
-| **RAM**               | 11.2 MB                     | 128 MB                            |
+| **RAM**               | 2 MB                     | 128 MB                            |
+
+| **VRAM**               | 1                     | 8 MB                            |
 | **Boot Method**       | BIOS                        | BIOS                              |
 
 ## Features
@@ -108,7 +110,7 @@ qemu-system-i386 -cdrom bananaos.img -m 128M
 ### Running BananaOS in QEMU With a 486
 After the successful build run
 ```bash
-qemu-system-i386 -cpu 486 -cdrom bananaos.img -m 11.2M
+qemu-system-i386 -cpu 486 -cdrom bananaos.img -m 4M
 ```
 
 ## Technologies Used
