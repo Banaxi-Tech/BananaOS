@@ -30,7 +30,6 @@ To run BananaOS, your system or virtual machine should meet the following specif
 | :-------------------- | :-------------------------- | :-------------------------------- |
 | **Processor**         | Intel 486                   | Intel Pentium 2 or equivalent     |
 | **RAM**               | 2 MB                     | 128 MB                            |
-
 | **VRAM**               | 1                     | 8 MB                            |
 | **Boot Method**       | BIOS                        | BIOS                              |
 
