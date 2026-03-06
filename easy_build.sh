@@ -45,7 +45,7 @@ if [ -f "bananaos.img" ]; then
     mv bananaos.img bananaos.iso
     echo "Result: bananaos.iso in the BananaOS Folder on Your Desktop."
     echo "-----------------------------------------"
-    echo "To run it install qemu or run in a hypervisor"
+    echo "To run it install qemu or run in any other hypervisor"
     echo "To run in QEMU (128MB): qemu-system-i386 -cdrom bananaos.iso -m 128M"
 else
     echo "❌ Build failed. Please check the terminal output for errors."

@@ -78,4 +78,10 @@ extern Window win_terminal;
 void draw_terminal();
 void terminal_handle_key(char key);
 
+// Browser
+extern Window win_browser;
+void draw_browser();
+void browser_handle_key(char c);
+void browser_scroll(int direction);
+
 #endif

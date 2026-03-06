@@ -3,6 +3,7 @@
 #include "fat16.h"
 #include "fat32.h"
 #include "ahci.h"
+#include "net.h"
 #include <stddef.h>
 
 // --- Terminal Window ---
@@ -268,6 +269,190 @@ static void cmd_clear() {
     term_clear();
 }
 
+// --- Command: netinfo ---
+static void hex_byte(uint8_t b, char* out) {
+    const char hex[] = "0123456789AB";
+    out[0] = hex[(b >> 4) & 0xF];
+    out[1] = hex[b & 0xF];
+}
+
+static void cmd_netinfo() {
+    if (!net_state.detected) {
+        term_print("No network adapter detected.");
+        term_print("Launch QEMU with: -device e1000,netdev=n -netdev user,id=n");
+        return;
+    }
+
+    term_print("=== Network Info ===");
+
+    // Adapter
+    term_print("Adapter: Intel E1000");
+
+    // Link status
+    term_print(net_state.link_up ? "Link:    UP" : "Link:    DOWN");
+
+    // MAC address
+    char mac_str[32] = "MAC:     ";
+    int p = 9;
+    for (int i = 0; i < 6; i++) {
+        hex_byte(net_state.mac[i], &mac_str[p]);
+        p += 2;
+        if (i < 5) mac_str[p++] = ':';
+    }
+    mac_str[p] = 0;
+    term_print(mac_str);
+
+    // IP address
+    char ip_str[32] = "IP:      ";
+    p = 9;
+    for (int i = 0; i < 4; i++) {
+        char num[4];
+        int_to_str(net_state.ip[i], num);
+        int nl = str_len(num);
+        for (int j = 0; j < nl; j++) ip_str[p++] = num[j];
+        if (i < 3) ip_str[p++] = '.';
+    }
+    ip_str[p] = 0;
+    term_print(ip_str);
+
+    // Gateway
+    char gw_str[32] = "Gateway: ";
+    p = 9;
+    for (int i = 0; i < 4; i++) {
+        char num[4];
+        int_to_str(net_state.gateway_ip[i], num);
+        int nl = str_len(num);
+        for (int j = 0; j < nl; j++) gw_str[p++] = num[j];
+        if (i < 3) gw_str[p++] = '.';
+    }
+    gw_str[p] = 0;
+    term_print(gw_str);
+}
+
+// --- Command: ping ---
+static int parse_ip(const char* s, uint8_t* out) {
+    int octet = 0;
+    int val = 0;
+    int digits = 0;
+    while (*s) {
+        if (*s >= '0' && *s <= '9') {
+            val = val * 10 + (*s - '0');
+            digits++;
+            if (val > 255) return 0;
+        } else if (*s == '.') {
+            if (digits == 0 || octet >= 3) return 0;
+            out[octet++] = (uint8_t)val;
+            val = 0;
+            digits = 0;
+        } else {
+            return 0;
+        }
+        s++;
+    }
+    if (digits == 0 || octet != 3) return 0;
+    out[octet] = (uint8_t)val;
+    return 1;
+}
+
+static void cmd_ping(const char* arg) {
+    if (!net_state.detected) {
+        term_print("No network adapter detected.");
+        return;
+    }
+    if (str_len(arg) == 0) {
+        term_print("Usage: ping <ip or hostname>");
+        term_print("  e.g: ping 10.0.2.2");
+        term_print("  e.g: ping google.com");
+        return;
+    }
+
+    uint8_t target[4];
+    int is_hostname = 0;
+
+    if (!parse_ip(arg, target)) {
+        // Not a valid IP — treat as hostname, do DNS lookup
+        is_hostname = 1;
+        char dns_msg[78] = "Resolving ";
+        int dp = 10;
+        const char* h = arg;
+        while (*h && dp < 70) dns_msg[dp++] = *h++;
+        dns_msg[dp++] = '.'; dns_msg[dp++] = '.'; dns_msg[dp++] = '.';
+        dns_msg[dp] = 0;
+        term_print(dns_msg);
+
+        if (!net_dns_resolve(arg, target)) {
+            term_print("DNS resolution failed.");
+            return;
+        }
+
+        // Print resolved IP
+        char res_msg[78] = "Resolved to ";
+        int rp = 12;
+        for (int i = 0; i < 4; i++) {
+            char num[4];
+            int_to_str(target[i], num);
+            int nl = str_len(num);
+            for (int j = 0; j < nl; j++) res_msg[rp++] = num[j];
+            if (i < 3) res_msg[rp++] = '.';
+        }
+        res_msg[rp] = 0;
+        term_print(res_msg);
+    }
+
+    char msg[78] = "Pinging ";
+    int p = 8;
+    for (int i = 0; i < 4; i++) {
+        char num[4];
+        int_to_str(target[i], num);
+        int nl = str_len(num);
+        for (int j = 0; j < nl; j++) msg[p++] = num[j];
+        if (i < 3) msg[p++] = '.';
+    }
+    if (is_hostname) {
+        msg[p++] = ' '; msg[p++] = '(';
+        const char* h2 = arg;
+        while (*h2 && p < 72) msg[p++] = *h2++;
+        msg[p++] = ')';
+    }
+    msg[p++] = '.'; msg[p++] = '.'; msg[p++] = '.';
+    msg[p] = 0;
+    term_print(msg);
+
+    net_send_ping(target[0], target[1], target[2], target[3]);
+
+    // Poll for reply with timeout
+    int got_reply = 0;
+    for (int i = 0; i < 2000000; i++) {
+        e1000_poll();
+        if (net_state.ping_replied) {
+            got_reply = 1;
+            net_state.ping_replied = 0;
+            net_state.ping_active = 0;
+            break;
+        }
+    }
+
+    if (got_reply) {
+        char reply[78] = "Reply from ";
+        p = 11;
+        for (int i = 0; i < 4; i++) {
+            char num[4];
+            int_to_str(target[i], num);
+            int nl = str_len(num);
+            for (int j = 0; j < nl; j++) reply[p++] = num[j];
+            if (i < 3) reply[p++] = '.';
+        }
+        const char* ok = " - Success";
+        while (*ok) reply[p++] = *ok++;
+        reply[p] = 0;
+        term_print(reply);
+    } else {
+        term_print("Request timed out.");
+        net_state.ping_active = 0;
+    }
+}
+
+
 // --- Command Parser ---
 static char* next_token(char* s, char* tok) {
     // Skip spaces
@@ -401,6 +586,10 @@ static void execute_command(char* cmd_str) {
         cmd_cat(tok2);
     } else if (str_case_cmp(tok1, "clear") == 0) {
         cmd_clear();
+    } else if (str_case_cmp(tok1, "netinfo") == 0) {
+        cmd_netinfo();
+    } else if (str_case_cmp(tok1, "ping") == 0) {
+        cmd_ping(tok2);
     } else if (str_len(tok1) > 0) {
         char errmsg[80] = "Unknown command: ";
         int el = str_len(errmsg);

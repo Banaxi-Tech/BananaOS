@@ -7,7 +7,7 @@ CFLAGS = -m32 -ffreestanding -fno-stack-protector -fno-pie -O2 -Wall -Wextra -c 
 ASFLAGS = -f elf32
 LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
-OBJS = boot.o kernel.o mouse.o calc.o notepad.o settings.o disk.o fat16.o fat32.o explorer.o dialog.o terminal.o pci.o ahci.o
+OBJS = boot.o kernel.o mouse.o calc.o notepad.o settings.o disk.o fat16.o fat32.o explorer.o dialog.o terminal.o pci.o ahci.o net.o browser.o
 
 all: bananaos.img
 

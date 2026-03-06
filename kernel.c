@@ -4,6 +4,7 @@
 #include "apps.h"
 #include "ahci.h"
 #include "pci.h"
+#include "net.h"
 
 
 // ===== Forward Declarations =====
@@ -397,9 +398,9 @@ int get_dock_hover_index() {
     int dock_y = scr_height - dock_h - 10;
     int spacing = 60;
     int base_size = 30;
-    int start_x = dock_x + (dock_w - (4*spacing)) / 2 - base_size/2;
+    int start_x = dock_x + (dock_w - (6*spacing)) / 2 - base_size/2;
 
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<6; i++) {
         int bx = start_x + (i * spacing);
         int by = dock_y + 15;
         // Expand hit box gracefully
@@ -412,8 +413,8 @@ int get_dock_hover_index() {
 }
 
 Window* get_window_at_pos(int x, int y, int titlebar_only) {
-    Window* windows[5] = {&win_terminal, &win_settings, &win_explorer, &win_notepad, &win_calc};
-    for (int i=0; i<5; i++) {
+    Window* windows[6] = {&win_terminal, &win_browser, &win_settings, &win_notepad, &win_explorer, &win_calc};
+    for (int i=0; i<6; i++) {
         Window* w = windows[i];
         if (w->open && !w->minimized) {
             int h = titlebar_only ? 20 : w->h;
@@ -533,6 +534,9 @@ if (mouse_y >= 0 && mouse_y <= 25) {
     }
     if (hover_idx == 4) { 
         win_settings.open = !win_settings.open; win_settings.minimized = 0; force_render_frame = 1; return; 
+    }
+    if (hover_idx == 5) { 
+        win_browser.open = !win_browser.open; win_browser.minimized = 0; force_render_frame = 1; return; 
     }
     
     Window* clicked_win = get_window_at_pos(mouse_x, mouse_y, 0);
@@ -770,13 +774,13 @@ void draw_dock() {
     int spacing = 60;
     int base_size = 30;
     int hover_size = 46;
-    int start_x = dock_x + (dock_w - (4*spacing)) / 2 - base_size/2;
+    int start_x = dock_x + (dock_w - (6*spacing)) / 2 - base_size/2;
 
-    uint32_t colors[5] = {0x000000, 0xFF9F0A, 0xFFFFFF, 0x5856D6, 0x8E8E93};
-    const char* labels[5] = {"T", "C", "N", "E", "S"};
+    uint32_t colors[6] = {0x000000, 0xFF9F0A, 0xFFFFFF, 0x5856D6, 0x8E8E93, 0x5AC8FA};
+    const char* labels[6] = {"T", "C", "N", "E", "S", "B"};
     int hover_idx = get_dock_hover_index();
 
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<6; i++) {
         int size = base_size;
         int y_offset = 0;
         int bx = start_x + (i * spacing);
@@ -1113,20 +1117,11 @@ case 0:
     if (mouse_byte[0] & 0xC0)
     break;
 
-int dx = (int8_t)mouse_byte[1];    // Needs to be reconfigured Soon
-int dy = (int8_t)mouse_byte[2];
+                int dx = (int8_t)mouse_byte[1];
+                int dy = (int8_t)mouse_byte[2];
 
-// Ignore tiny jitter from QEMU (deadzone)
-if (dx > -2 && dx < 2)
-    dx = 0;
-
-if (dy > -2 && dy < 2)
-    dy = 0;
-
-if (dx != 0 || dy != 0) {
-    mouse_x += dx;
-    mouse_y -= dy;
-}
+                mouse_x += dx;
+                mouse_y -= dy;
 
 
                     
@@ -1155,6 +1150,8 @@ if (dx != 0 || dy != 0) {
                     char c = shift_active ? scancode_ascii_shift[port_data] : scancode_ascii[port_data];
                     if (c && win_terminal.open && !win_terminal.minimized) {
                         terminal_handle_key(c);
+                    } else if (c && win_browser.open && !win_browser.minimized) {
+                        browser_handle_key(c);
                     } else if (c && win_notepad.open && !win_notepad.minimized) {
                         if (c == '\b') {
                             if (notepad_len > 0) notepad_len--;
@@ -1197,6 +1194,7 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     idt_install();
     mouse_install();
     ahci_init();
+    e1000_init();
     acpi_supported = detect_acpi();
     
     uint32_t highest_mod_end = 0x400000; 
@@ -1281,6 +1279,7 @@ if (!backbuffer)
 
     while (1) {
         poll_ps2();
+        e1000_poll();
         
 int current_hover_idx = get_dock_hover_index();
 
@@ -1323,6 +1322,7 @@ if (current_hover_idx != last_hover_idx) {
             draw_explorer();
             draw_notepad();
             draw_settings();
+            draw_browser();
             draw_terminal();
             draw_dialog();
             draw_dock(); 
