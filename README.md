@@ -35,15 +35,16 @@ To run BananaOS, your system or virtual machine should meet the following specif
 
 ## Features
 *   **Multiboot Compliant Kernel**: Loaded by GRUB, providing essential system services.
+*   ** Newly Added Network Supprot**
 *   **VESA Framebuffer Graphics**:
     *   High-resolution graphical output (default 1024x768, configurable via Multiboot).
     *   Double buffering for smooth animations and UI rendering.
     *   Basic graphics primitives: pixel, rectangle, rounded rectangle drawing with alpha blending.
     *   BMP wallpaper support (loaded as a Multiboot module).
 *   **Graphical User Interface (GUI)**:
-    *   **Window Manager**: Features movable, resizable (maximize/minimize), and closeable windows.
+    *   **Window Manager**: Features movable, resizable (maximize/minimize), and closeable Windoof.
     *   **Application Dock**: A central launcher for integrated applications, with hover animations.
-    *   **Theming**: Supports light/dark modes, and customizable rounded or square styles for windows and the dock.
+    *   **Theming**: Supports light/dark modes, and customizable rounded or square styles for Windoof and the dock.
 *   **Input Handling**:
     *   PS/2 Mouse support for cursor control and UI interaction.
     *   PS/2 Keyboard support with scancode to ASCII conversion and Shift key handling.
@@ -62,7 +63,8 @@ To run BananaOS, your system or virtual machine should meet the following specif
 ## Getting Started
 
 ### Prerequisites
-To build and run BananaOS, you will need a Debian-based Linux system (such as Ubuntu, Debian, or WSL2).
+> [!NOTE]
+> You will need a Debian Based Linux Distro to build bananaOS, Arch Linux is possible but not supported
 
 
 You can either use the easy build script or the manual build if you plan to change the code
