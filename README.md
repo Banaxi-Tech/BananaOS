@@ -70,7 +70,7 @@ BananaOS is a hobby operating system designed for learning and exploring low-lev
     *   PCI (Peripheral Component Interconnect) bus enumeration.
 *   **Memory Management**: Basic physical memory detection and backbuffer allocation strategy based on available RAM. Includes checks for minimum memory requirements.
 * **486 Retro-Compatibility**: Includes an ISR to emulate CMOV instructions, allowing the OS to boot on original Intel 486 hardware.
-=======
+
 
 ### Kernel & Core
 - **Multiboot Compliant** — Loaded by GRUB bootloader
@@ -137,17 +137,11 @@ BananaOS/
 ├── Makefile                # Build system
 └── bg.bmp                  # Default wallpaper
 ```
->>>>>>> 68c6072 (Added Setup Cleanup Root)
+
 
 ## Getting Started
 
 ### Prerequisites
-<<<<<<< HEAD
-> [!NOTE]
-> You will need a Debian Based Linux Distro to build bananaOS, Arch Linux is possible but not supported
-=======
->>>>>>> 68c6072 (Added Setup Cleanup Root)
-
 You need a Linux system with development tools. Debian/Ubuntu is recommended.
 
 ### Quick Build (One Command)
@@ -168,10 +162,6 @@ sudo apt update
 sudo apt install -y build-essential nasm gcc-multilib binutils grub-common grub-pc-bin xorriso mtools qemu-system
 ```
 
-**Arch Linux:**
-```bash
-sudo pacman -S base-devel nasm grub xorriso mtools qemu
-```
 
 ### Build Commands
 
@@ -185,9 +175,6 @@ make buildPortable
 
 # Build the installer ISO (includes portable image)
 make buildSetup
-
-# Clean build artifacts
-make clean
 ```
 
 ### Build Outputs
@@ -206,23 +193,12 @@ make clean
 qemu-system-i386 -cdrom bananaos.img -m 128M
 ```
 
-<<<<<<< HEAD
-> [!WARNING]
-> BananaOS Has a network driver for e1000 network card though the browser doesent work that good because of redirects and https this will be fixed soon you can run it with
-```bash
-qemu-system-i386 -cdrom bananaos.img -m 128M -netdev user,id=net0 -device e1000,netdev=net0
-```
-
-### Running BananaOS in QEMU With a 486
-After the successful build run
-=======
 **With networking:**
 ```bash
 qemu-system-i386 -cdrom bananaos.img -m 128M -netdev user,id=n -device e1000,netdev=n
 ```
 
 **486 mode (4MB RAM):**
->>>>>>> 68c6072 (Added Setup Cleanup Root)
 ```bash
 qemu-system-i386 -cpu 486 -cdrom bananaos.img -m 4M
 ```
