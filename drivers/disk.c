@@ -82,13 +82,79 @@ void ata_read_sector(uint8_t drive, uint32_t lba, uint8_t* buffer) {
     }
 }
 
+void ata_write_sector(uint8_t drive, uint32_t lba, const uint8_t* buffer) {
+    if (!ata_wait_bsy()) return;
+    outb(0x1F6, (uint8_t)(0xE0 | (drive << 4) | ((lba >> 24) & 0x0F)));
+    outb(0x1F2, 1);
+    outb(0x1F3, (uint8_t)lba);
+    outb(0x1F4, (uint8_t)(lba >> 8));
+    outb(0x1F5, (uint8_t)(lba >> 16));
+    outb(0x1F7, 0x30); // WRITE SECTORS
+
+    if (!ata_wait_drq()) return;
+    for (int i = 0; i < 256; i++) {
+        uint16_t data = buffer[i * 2] | ((uint16_t)buffer[i * 2 + 1] << 8);
+        outw(0x1F0, data);
+    }
+}
+
+void ata_write_sectors(uint8_t drive, uint32_t lba, uint8_t count, const uint8_t* buffer) {
+    if (!ata_wait_bsy()) return;
+    outb(0x1F6, (uint8_t)(0xE0 | (drive << 4) | ((lba >> 24) & 0x0F)));
+    outb(0x1F2, count);
+    outb(0x1F3, (uint8_t)lba);
+    outb(0x1F4, (uint8_t)(lba >> 8));
+    outb(0x1F5, (uint8_t)(lba >> 16));
+    outb(0x1F7, 0x30); // WRITE SECTORS
+
+    for (int c = 0; c < count; c++) {
+        if (!ata_wait_ready()) return;
+        for (int i = 0; i < 256; i++) {
+            int offset = (c * 512) + (i * 2);
+            uint16_t data = buffer[offset] | ((uint16_t)buffer[offset + 1] << 8);
+            outw(0x1F0, data);
+        }
+    }
+}
+
+void ata_flush(uint8_t drive) {
+    outb(0x1F6, (uint8_t)(0xE0 | (drive << 4)));
+    if (!ata_wait_bsy()) return;
+    outb(0x1F7, 0xE7); // CACHE FLUSH
+    ata_wait_bsy();
+}
+
+void disk_write_sector(uint8_t drive, uint32_t lba, const uint8_t* buffer) {
+    if (drive < 2) {
+        ata_write_sector(drive, lba, buffer);
+    } else {
+        ahci_write(drive - 2, lba, 1, (const uint16_t*)buffer);
+    }
+}
+
+void disk_write_sectors(uint8_t drive, uint32_t lba, uint32_t count, const uint8_t* buffer) {
+    if (drive < 2) {
+        uint32_t written = 0;
+        while (written < count) {
+            uint8_t batch = (count - written > 255) ? 255 : (uint8_t)(count - written);
+            ata_write_sectors(drive, lba + written, batch, buffer + (written * 512));
+            written += batch;
+        }
+    } else {
+        ahci_write(drive - 2, lba, count, (const uint16_t*)buffer);
+    }
+}
+
+void disk_flush(uint8_t drive) {
+    if (drive < 2) ata_flush(drive);
+}
+
 int ata_drive_exists(uint8_t drive) {
     outb(0x1F6, (uint8_t)(0xE0 | (drive << 4)));
-    // Wait a tiny bit for the drive to select
-    for(int i=0; i<1000; i++) inb(0x1F7); 
+    for(int i=0; i<1000; i++) inb(0x1F7);
     
     uint8_t status = inb(0x1F7);
-    if (status == 0xFF) return 0; // Floating bus, no drive
-    if (status == 0x00) return 0; // No drive
+    if (status == 0xFF) return 0;
+    if (status == 0x00) return 0;
     return 1;
 }

@@ -125,6 +125,7 @@ typedef struct {
 
 void ahci_init();
 int ahci_read(int port, uint32_t lba, uint32_t count, uint16_t* buffer);
+int ahci_write(int port, uint32_t lba, uint32_t count, const uint16_t* buffer);
 int ahci_drive_exists(int port);
 
 #endif

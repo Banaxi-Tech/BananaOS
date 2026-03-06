@@ -1,7 +1,7 @@
 #include "apps.h"
-#include "disk.h"
-#include "fat16.h"
-#include "fat32.h"
+#include "../drivers/disk.h"
+#include "../drivers/fat16.h"
+#include "../drivers/fat32.h"
 #include <stddef.h>
 
 Window win_explorer = {200, 200, 400, 300, 0, 0, 0, 200, 200, 400, 300, "Banana Files"};

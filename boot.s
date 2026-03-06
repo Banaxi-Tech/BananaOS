@@ -68,3 +68,59 @@ as_isr6:
     pop ds
     popad
     iret
+
+extern isr128_handler
+global as_isr128
+as_isr128:
+    pushad
+    push ds
+    push es
+    push fs
+    push gs
+    
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    
+    push esp
+    call isr128_handler
+    add esp, 4
+    
+    pop gs
+    pop fs
+    pop es
+    pop ds
+    popad
+    iret
+
+global jmp_user
+global return_to_kernel
+
+section .data
+kernel_esp dd 0
+
+section .text
+jmp_user:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    
+    mov [kernel_esp], esp
+    
+    mov eax, [ebp+8]   ; entry point
+    mov esp, [ebp+12]  ; user stack
+    
+    call eax
+    
+.exit:
+    mov esp, [kernel_esp]
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+return_to_kernel:
+    jmp jmp_user.exit

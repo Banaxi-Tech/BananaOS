@@ -1,10 +1,10 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "font.h"
-#include "apps.h"
-#include "ahci.h"
-#include "pci.h"
-#include "net.h"
+#include "apps/apps.h"
+#include "drivers/ahci.h"
+#include "drivers/pci.h"
+#include "drivers/net.h"
 
 
 // ===== Forward Declarations =====
@@ -344,8 +344,8 @@ void itoa(int val, char* buf) {
 int topbar_menu_open = 0;
 
 int dialog_mode = 0;
-char system_version[] = "1.2.1";
-char system_build[] = "Build 139";
+char system_version[] = "1.3.0";
+char system_build[] = "Build 201";
 int mouse_x = 512;
 int mouse_y = 384;
 uint8_t mouse_cycle = 0;
@@ -412,9 +412,14 @@ int get_dock_hover_index() {
     return -1;
 }
 
+Window win_bex;
+uint32_t* bex_canvas;
+void desktop_tick();
+void draw_bex_window();
+
 Window* get_window_at_pos(int x, int y, int titlebar_only) {
-    Window* windows[6] = {&win_terminal, &win_browser, &win_settings, &win_notepad, &win_explorer, &win_calc};
-    for (int i=0; i<6; i++) {
+    Window* windows[7] = {&win_terminal, &win_browser, &win_settings, &win_notepad, &win_explorer, &win_calc, &win_bex};
+    for (int i=0; i<7; i++) {
         Window* w = windows[i];
         if (w->open && !w->minimized) {
             int h = titlebar_only ? 20 : w->h;
@@ -1058,10 +1063,72 @@ void isr6_handler(Registers* regs) {
     while(1) asm("hlt");
 }
 
+extern void as_isr128();
+extern void return_to_kernel();
+
+void isr128_handler(Registers* regs) {
+    if (regs->eax == 1) { // sys_print
+        char* str = (char*)regs->ebx;
+        term_print(str);
+    } else if (regs->eax == 2) { // sys_exit
+        return_to_kernel();
+    } else if (regs->eax == 3) { // sys_popup
+        char* str = (char*)regs->ebx;
+        int i = 0;
+        // MUST ONLY COPY UP TO 127 CHARS (buffer size is 128)
+        while (str[i] != '\0' && i < 127) {
+            custom_dialog_msg[i] = str[i];
+            i++;
+        }
+        custom_dialog_msg[i] = '\0';
+        
+        dialog_mode = 2;
+        win_dialog.open = 1;
+        // Small helper to set title without strcpy
+        char t[] = "Message";
+        int j = 0;
+        while (t[j]) { win_dialog.title[j] = t[j]; j++; }
+        win_dialog.title[j] = '\0';
+        force_render_frame = 1;
+    } else if (regs->eax == 4) { // sys_window_create
+        int w = regs->ebx;
+        int h = regs->ecx;
+        char* title = (char*)regs->edx;
+        uint32_t* buffer = (uint32_t*)regs->esi;
+        
+        win_bex.w = w + 4;
+        win_bex.h = h + 24;
+        win_bex.open = 1;
+        win_bex.minimized = 0;
+        
+        int j = 0;
+        while (title[j] && j < 31) { win_bex.title[j] = title[j]; j++; }
+        win_bex.title[j] = '\0';
+        
+        bex_canvas = buffer;
+        force_render_frame = 1;
+    } else if (regs->eax == 5) { // sys_window_update (yield)
+        desktop_tick();
+    } else if (regs->eax == 6) { // sys_get_event
+        // ebx = ptr to int x, ecx = ptr to int y, edx = ptr to int clicked
+        int* px = (int*)regs->ebx;
+        int* py = (int*)regs->ecx;
+        int* pclick = (int*)regs->edx;
+        
+        // Return relative to bex window client area
+        *px = mouse_x - (win_bex.x + 2);
+        *py = mouse_y - (win_bex.y + 22);
+        extern int bex_window_clicked;
+        *pclick = bex_window_clicked;
+        bex_window_clicked = 0;
+    }
+}
+
 void idt_install() {
     idtp.limit = (sizeof(struct idt_entry) * 256) - 1; idtp.base = (uint32_t)&idt; 
     asm volatile("lidt %0" : : "m" (idtp));
     idt_set_gate(6, (uint32_t)as_isr6, 0x08, 0x8E);
+    idt_set_gate(128, (uint32_t)as_isr128, 0x08, 0x8E);
 }
 
 void acpi_shutdown() {
@@ -1187,6 +1254,104 @@ void reboot_system() {
 }
 
 extern void mouse_install();
+Window win_bex = {150, 150, 400, 300, 0, 0, 0, 150, 150, 400, 300, "BEX App"};
+uint32_t* bex_canvas = NULL;
+
+void draw_bex_window() {
+    if (!win_bex.open || win_bex.minimized) return;
+    draw_window_frame(&win_bex);
+    if (bex_canvas) {
+        int cx = win_bex.x + 2;
+        int cy = win_bex.y + 22;
+        int cw = win_bex.w - 4;
+        int ch = win_bex.h - 24;
+        for (int y = 0; y < ch; y++) {
+            for (int x = 0; x < cw; x++) {
+                draw_pixel(cx + x, cy + y, bex_canvas[y * cw + x]);
+            }
+        }
+    }
+}
+
+int last_hover_idx = -1;
+int last_drawn_mouse_x = -1;
+int last_drawn_mouse_y = -1;
+int bex_window_clicked = 0;
+
+void desktop_tick() {
+    poll_ps2();
+    e1000_poll();
+    
+    int current_hover_idx = get_dock_hover_index();
+
+    if (current_hover_idx != last_hover_idx) {
+        // Only trigger full redraw if we ENTER or LEAVE a dock icon
+        if (current_hover_idx == -1 || last_hover_idx == -1) {
+            force_render_frame = 1;
+        }
+        last_hover_idx = current_hover_idx;
+    }
+
+    if (mouse_clicked) {
+        if (get_window_at_pos(mouse_x, mouse_y, 0) == &win_bex) {
+            bex_window_clicked = 1;
+        }
+        check_click();
+        mouse_clicked = 0;
+    }
+
+    if (is_dragging) {
+        if (!mouse_down) {
+            is_dragging = 0;
+            dragged_window = NULL;
+        } else if (dragged_window) {
+            int nx = mouse_x - drag_offset_x;
+            int ny = mouse_y - drag_offset_y;
+            if (nx != dragged_window->x || ny != dragged_window->y) {
+                dragged_window->x = nx;
+                dragged_window->y = ny;
+                force_render_frame = 1;
+            }
+        }
+    }
+
+    if (force_render_frame) {
+        // Full 8MB rendering pipeline triggered by UI changes
+        draw_wallpaper(); 
+        draw_calculator();
+        draw_explorer();
+        draw_notepad();
+        draw_settings();
+        draw_browser();
+        draw_terminal();
+        draw_bex_window();
+        draw_dialog();
+        draw_dock(); 
+        draw_topbar();
+        
+        swap_buffers();
+        
+        // Draw initial cursor directly to VRAM
+        draw_cursor_direct(mouse_x, mouse_y);
+        
+        force_render_frame = 0;
+        last_drawn_mouse_x = mouse_x;
+        last_drawn_mouse_y = mouse_y;
+        
+    } else if (mouse_x != last_drawn_mouse_x || mouse_y != last_drawn_mouse_y) {
+        restore_cursor(last_drawn_mouse_x, last_drawn_mouse_y);
+        draw_cursor_direct(mouse_x, mouse_y);
+
+        last_drawn_mouse_x = mouse_x;
+        last_drawn_mouse_y = mouse_y;
+    }
+
+    // Lock rendering execution loop to simulated 60Hz VGA vblank
+    // This stops the main thread from requesting 1 Million MMIO port polls per second
+    while (inb(0x3DA) & 0x08); 
+    while (!(inb(0x3DA) & 0x08));
+}
+
 void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     if (magic != 0x2BADB002) return;
     
@@ -1273,82 +1438,8 @@ if (!backbuffer)
 
     get_cpu_info();
     explorer_init(0); // Initialize default drive for File Explorer
-    int last_hover_idx = -1;
-    int last_drawn_mouse_x = -1;
-    int last_drawn_mouse_y = -1;
-
+    
     while (1) {
-        poll_ps2();
-        e1000_poll();
-        
-int current_hover_idx = get_dock_hover_index();
-
-if (current_hover_idx != last_hover_idx) {
-
-    // Only trigger full redraw if we ENTER or LEAVE a dock icon
-    if (current_hover_idx == -1 || last_hover_idx == -1) {
-        force_render_frame = 1;
-    }
-
-    last_hover_idx = current_hover_idx;
-}
-
-        if (mouse_clicked) {
-            check_click();
-            mouse_clicked = 0;
-        }
-
-        if (is_dragging) {
-            if (!mouse_down) {
-                is_dragging = 0;
-                dragged_window = NULL;
-            } else if (dragged_window) {
-                int nx = mouse_x - drag_offset_x;
-                int ny = mouse_y - drag_offset_y;
-                if (nx != dragged_window->x || ny != dragged_window->y) {
-                    dragged_window->x = nx;
-                    dragged_window->y = ny;
-                    force_render_frame = 1;
-                }
-            }
-        }
-
-
-        
-        if (force_render_frame) {
-            // Full 8MB rendering pipeline triggered by UI changes
-            draw_wallpaper(); 
-            draw_calculator();
-            draw_explorer();
-            draw_notepad();
-            draw_settings();
-            draw_browser();
-            draw_terminal();
-            draw_dialog();
-            draw_dock(); 
-            draw_topbar();
-            
-            swap_buffers();
-            
-            // Draw initial cursor directly to VRAM
-            draw_cursor_direct(mouse_x, mouse_y);
-            
-            force_render_frame = 0;
-            last_drawn_mouse_x = mouse_x;
-            last_drawn_mouse_y = mouse_y;
-            
-} else if (mouse_x != last_drawn_mouse_x || mouse_y != last_drawn_mouse_y) {
-
-restore_cursor(last_drawn_mouse_x, last_drawn_mouse_y);
-draw_cursor_direct(mouse_x, mouse_y);
-
-last_drawn_mouse_x = mouse_x;
-last_drawn_mouse_y = mouse_y;
-}
-
-        // Lock rendering execution loop to simulated 60Hz VGA vblank
-        // This stops the main thread from requesting 1 Million MMIO port polls per second
-        while (inb(0x3DA) & 0x08); 
-        while (!(inb(0x3DA) & 0x08));
+        desktop_tick();
     }
 }

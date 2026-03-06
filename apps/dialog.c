@@ -1,6 +1,7 @@
 #include "apps.h"
 
 Window win_dialog = {0, 0, 400, 200, 0, 0, 0, 0, 0, 400, 200, ""};
+char custom_dialog_msg[128] = {0};
 
 void draw_dialog() {
     if (!win_dialog.open) return;
@@ -28,6 +29,9 @@ void draw_dialog() {
 
         draw_string("Build:", wx + 20, wy + 110, get_text_color());
         draw_string(system_build, wx + 100, wy + 110, get_text_color());
+    }
+    else if (dialog_mode == 2) {
+        draw_string(custom_dialog_msg, wx + 20, wy + 50, get_text_color());
     }
 
     // --- OK BUTTON ---

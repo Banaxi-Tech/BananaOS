@@ -1,6 +1,6 @@
 #include "ahci.h"
 #include "pci.h"
-#include "apps.h" // for draw_string debugging if needed
+#include "../apps/apps.h"
 #include <stddef.h>
 
 static HBA_MEM* abar = NULL;
@@ -150,5 +150,56 @@ int ahci_read(int port, uint32_t lba, uint32_t count, uint16_t* buffer) {
     }
 
     if (timeout <= 0) return 0; // Timeout
+    return 1;
+}
+
+int ahci_write(int port, uint32_t lba, uint32_t count, const uint16_t* buffer) {
+    if (!abar || ahci_ports[port] != AHCI_DEV_SATA) return 0;
+
+    HBA_PORT* p = &abar->ports[port];
+    p->is = 0xFFFFFFFF;
+    p->serr = 0xFFFFFFFF;
+
+    HBA_CMD_HEADER* cmd_hdr = (HBA_CMD_HEADER*)p->clb;
+    cmd_hdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
+    cmd_hdr->w = 1; // Write direction: host to device
+    cmd_hdr->prdtl = 1;
+
+    HBA_CMD_TBL* cmd_tbl = (HBA_CMD_TBL*)cmd_hdr->ctba;
+    for (int i=0; i<(int)sizeof(HBA_CMD_TBL); i++) ((uint8_t*)cmd_tbl)[i] = 0;
+
+    cmd_tbl->prdt_entry[0].dba = (uint32_t)buffer;
+    cmd_tbl->prdt_entry[0].dbau = 0;
+    cmd_tbl->prdt_entry[0].dbc = (count * 512) - 1;
+    cmd_tbl->prdt_entry[0].i = 1;
+
+    FIS_REG_H2D* fis = (FIS_REG_H2D*)(&cmd_tbl->cfis);
+    fis->fis_type = FIS_TYPE_REG_H2D;
+    fis->c = 1;
+    fis->command = 0x35; // WRITE DMA EXT
+
+    fis->lba0 = (uint8_t)lba;
+    fis->lba1 = (uint8_t)(lba >> 8);
+    fis->lba2 = (uint8_t)(lba >> 16);
+    fis->device = 1 << 6;
+
+    fis->lba3 = (uint8_t)(lba >> 24);
+    fis->countl = (uint8_t)count;
+    fis->counth = (uint8_t)(count >> 8);
+
+    int spin = 0;
+    while ((p->tfd & (0x80 | 0x08)) && spin < 1000000) spin++;
+    if (spin == 1000000) return 0;
+
+    p->ci = 1;
+
+    int timeout = 1000000;
+    while (timeout--) {
+        if ((p->ci & 1) == 0) break;
+        if (p->is & (uint32_t)(1 << 30)) return 0;
+        asm volatile("pause");
+    }
+
+    if (timeout <= 0) return 0;
     return 1;
 }

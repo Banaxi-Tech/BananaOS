@@ -1,5 +1,5 @@
 #include "apps.h"
-#include "net.h"
+#include "../drivers/net.h"
 #include <stddef.h>
 
 // --- Browser Window ---

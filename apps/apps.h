@@ -71,12 +71,15 @@ extern char system_version[];
 extern char system_build[];
 extern int dialog_mode;
 extern Window win_dialog;
+extern char custom_dialog_msg[128];
 void draw_dialog();
 
 // Terminal
 extern Window win_terminal;
 void draw_terminal();
 void terminal_handle_key(char key);
+void term_print(const char* s);
+void load_bex(uint8_t drive, const char* filename);
 
 // Browser
 extern Window win_browser;

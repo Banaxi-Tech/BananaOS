@@ -1,9 +1,9 @@
 #include "apps.h"
-#include "disk.h"
-#include "fat16.h"
-#include "fat32.h"
-#include "ahci.h"
-#include "net.h"
+#include "../drivers/disk.h"
+#include "../drivers/fat16.h"
+#include "../drivers/fat32.h"
+#include "../drivers/ahci.h"
+#include "../drivers/net.h"
 #include <stddef.h>
 
 // --- Terminal Window ---
@@ -59,7 +59,7 @@ static void int_to_str(int v, char* buf) {
 }
 
 // --- Output Functions ---
-static void term_print(const char* s) {
+void term_print(const char* s) {
     if (line_count >= TERM_MAX_LINES) {
         // Scroll: shift lines up by one
         for (int i = 0; i < TERM_MAX_LINES - 1; i++)
@@ -590,6 +590,38 @@ static void execute_command(char* cmd_str) {
         cmd_netinfo();
     } else if (str_case_cmp(tok1, "ping") == 0) {
         cmd_ping(tok2);
+    } else if (str_len(tok1) > 4 && str_case_cmp(tok1 + str_len(tok1) - 4, ".bex") == 0) {
+        // Find drive and filename similar to cmd_cat
+        uint8_t drive = 255;
+        const char* filename = NULL;
+        if (str_ncmp(tok1, "/dev/disk", 9) == 0) {
+            drive = tok1[9] - '0';
+            if (drive <= 1 && tok1[10] == '/') filename = &tok1[11];
+        } else if (str_ncmp(tok1, "/dev/sata", 9) == 0) {
+            int d = 0;
+            if (tok1[10] >= '0' && tok1[10] <= '9') {
+                d = (tok1[9]-'0')*10 + (tok1[10]-'0');
+                if (tok1[11] == '/') filename = &tok1[12];
+            } else {
+                d = tok1[9]-'0';
+                if (tok1[10] == '/') filename = &tok1[11];
+            }
+            if (d >= 0 && d <= 31) drive = d + 2;
+        } else {
+            for (int i = 0; i < mount_count; i++) {
+                int mlen = str_len(mounts[i].path);
+                if (str_ncmp(tok1, mounts[i].path, mlen) == 0 && tok1[mlen] == '/') {
+                    drive = mounts[i].drive;
+                    filename = &tok1[mlen + 1];
+                    break;
+                }
+            }
+        }
+        if (drive != 255 && filename != NULL) {
+            load_bex(drive, filename);
+        } else {
+            term_print("File not found or invalid path.");
+        }
     } else if (str_len(tok1) > 0) {
         char errmsg[80] = "Unknown command: ";
         int el = str_len(errmsg);
