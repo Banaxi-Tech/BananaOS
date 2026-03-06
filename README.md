@@ -45,7 +45,6 @@ BananaOS is a hobby operating system designed for learning and exploring low-lev
 > **Note:** The Setup ISO requires at least **48 MB RAM** to boot. For systems with less RAM, use the portable image directly.
 
 ## Features
-<<<<<<< HEAD
 *   **Multiboot Compliant Kernel**: Loaded by GRUB, providing essential system services.
 *   ** Newly Added Network Supprot**
 *   **VESA Framebuffer Graphics**:
@@ -85,7 +84,7 @@ BananaOS is a hobby operating system designed for learning and exploring low-lev
 - **BMP Wallpapers** — Custom background support
 
 ### User Interface
-- **Window Manager** — Draggable, resizable, minimizable windows
+- **Window Manager** — Draggable, resizable, minimizable Windoof
 - **Application Dock** — Animated launcher bar
 - **Theming** — Light/dark modes, rounded/square styles
 - **Top Bar** — System menu with clock
