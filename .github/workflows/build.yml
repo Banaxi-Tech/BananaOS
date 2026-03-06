@@ -26,19 +26,22 @@ jobs:
         sudo apt install -y build-essential nasm gcc-multilib binutils \
                             grub-common grub-pc-bin xorriso mtools
 
-    - name: Compile OS
+    - name: Build portable image
       run: |
         make clean
-        make
+        make buildPortable
 
-    # This renames the generic bananaos.img to include the branch name
-    - name: Prepare Artifact Name
-      run: mv bananaos.img bananaos-${{ github.ref_name }}.img
+    - name: Build setup ISO
+      run: make buildSetup
 
-    - name: Upload Build Artifact
+    - name: Upload portable image artifact
       uses: actions/upload-artifact@v4
       with:
-        # This names the download folder in GitHub
-        name: bananaos-${{ github.ref_name }}-image
-        # This points to the newly renamed file
-        path: bananaos-${{ github.ref_name }}.img
+        name: bananaos-${{ github.ref_name }}-portable
+        path: bananaos.img
+
+    - name: Upload setup ISO artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bananaos-${{ github.ref_name }}-setup
+        path: setup.iso
