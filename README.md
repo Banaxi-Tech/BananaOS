@@ -108,6 +108,13 @@ After a successful build, you can run BananaOS using QEMU:
 ```bash
 qemu-system-i386 -cdrom bananaos.img -m 128M
 ```
+
+> [!WARNING]
+> BananaOS Has a network driver for e1000 network card though the browser doesent work that good because of redirects and https this will be fixed soon you can run it with
+```bash
+qemu-system-i386 -cdrom bananaos.img -m 128M -netdev user,id=net0 -device e1000,netdev=net0
+```
+
 ### Running BananaOS in QEMU With a 486
 After the successful build run
 ```bash
