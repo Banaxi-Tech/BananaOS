@@ -4,6 +4,7 @@
 #include "../drivers/disk.h"
 #include "../drivers/pci.h"
 #include "../drivers/ahci.h"
+#include "../drivers/cdfs.h"
 
 /* ===== I/O Port Access ===== */
 static inline void outb(uint16_t port, uint8_t val) {
@@ -78,22 +79,33 @@ int mouse_clicked = 0;
 int mouse_down = 0;
 int force_render_frame = 1;
 
+/* Animation (frame counter; increment each vsync) */
+static uint32_t anim_frame = 0;
+static int anim_panel_off_y = 0;   /* panel slide-in: 0 = rest, negative = sliding down */
+static int anim_prev_state = -1;
+/* Auto: 1 if RAM >= 64MB and CPU Pentium+. User can override with toggle. */
+static int animations_enabled = 0;
+/* Effective value used for rendering (user toggle overrides auto). */
+static int animations_on = 0;
+
 /* ===== Cursor ===== */
 static uint32_t cursor_backup[64];
 static int last_mx = -1, last_my = -1;
 
 /* ===== Image Data ===== */
-static uint8_t* img_data = NULL;
-static uint32_t img_size = 0;
+static uint32_t cdfs_image_lba = 0;
+static uint32_t cdfs_image_size = 0;
+static int use_cdfs = 0;
 
 /* ===== Setup State Machine ===== */
-#define STATE_WELCOME    0
-#define STATE_LANGUAGE   1
-#define STATE_SELECT     2
-#define STATE_CONFIRM    3
-#define STATE_INSTALLING 4
-#define STATE_DONE       5
-#define STATE_ERROR      6
+#define STATE_WELCOME       0
+#define STATE_PRESS_INSTALL 1
+#define STATE_LANGUAGE      2
+#define STATE_SELECT        3
+#define STATE_CONFIRM       4
+#define STATE_INSTALLING    5
+#define STATE_DONE         6
+#define STATE_ERROR        7
 
 static int setup_state = STATE_WELCOME;
 
@@ -122,11 +134,27 @@ static const char* str_cannot_undo[2]      = { "This action cannot be undone.", 
 static const char* str_installing[2]       = { "Installing BananaOS...", "BananaOS wird installiert..." };
 static const char* str_complete[2]         = { "Installation complete!", "Installation abgeschlossen!" };
 static const char* str_installed_to[2]     = { "BananaOS has been installed to:", "BananaOS wurde installiert auf:" };
-static const char* str_restarting[2]       = { "Your computer will restart now...", "Ihr Computer wird jetzt neu gestartet..." };
+static const char* str_restart_prompt[2]  = { "Click Restart when you are ready.", "Klicken Sie auf Neustart, wenn Sie bereit sind." };
+static const char* str_restart[2]         = { "Restart", "Neustart" };
 static const char* str_error[2]            = { "Error!", "Fehler!" };
 static const char* str_no_image[2]         = { "No OS image found in setup media.", "Kein OS-Image im Setup-Medium gefunden." };
 static const char* str_rebuild[2]          = { "Please rebuild with: make buildSetup", "Bitte neu erstellen mit: make buildSetup" };
 static const char* str_setup_title[2]      = { "BananaOS Setup", "BananaOS Setup" };
+static const char* str_press_to_install[2] = { "Press to install", "Zum Installieren druecken" };
+static const char* str_license[2]          = { "This software is licensed under the GNU GPL v3.0.", "Diese Software steht unter der GNU GPL v3.0." };
+static const char* str_animations[2]       = { "Animations: On", "Animationen: An" };
+static const char* str_animations_off[2]   = { "Animations: Off", "Animationen: Aus" };
+
+/* Panel dimensions and colors (modern dark theme) */
+#define PANEL_W      620
+#define PANEL_H      440
+#define GLASS_H      44
+#define PANEL_BG    0x1a1f2e
+#define PANEL_BORDER 0x2d3548
+#define TITLEBAR_BG  0x252b3b
+#define TITLEBAR_ACCENT 0x5b7cff
+#define CONTENT_BG   0x1e2433
+#define LICENSE_COLOR 0x6b7280
 
 /* ===== Drive List ===== */
 typedef struct {
@@ -288,6 +316,9 @@ void isr128_handler(Registers* regs) {
 }
 
 /* ===== Drawing Primitives ===== */
+void draw_char(char c, int x, int y, uint32_t fg);
+void draw_string(const char* str, int x, int y, uint32_t fg);
+
 void draw_pixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)scr_width || y < 0 || y >= (int)scr_height || !backbuffer) return;
     *(uint32_t*)((uint8_t*)backbuffer + (y * pitch) + (x * (bpp / 8))) = color;
@@ -304,9 +335,57 @@ void draw_rect(int x, int y, int w, int h, uint32_t color) {
             draw_pixel(x + j, y + i, color);
 }
 
+/* Interpolate between two RGB colors (t in 0..256) */
+static uint32_t lerp_color(uint32_t c1, uint32_t c2, int t) {
+    if (t <= 0) return c1;
+    if (t >= 256) return c2;
+    int r = ((c1 >> 16) & 0xFF) * (256 - t) + ((c2 >> 16) & 0xFF) * t;
+    int g = ((c1 >> 8) & 0xFF) * (256 - t) + ((c2 >> 8) & 0xFF) * t;
+    int b = (c1 & 0xFF) * (256 - t) + (c2 & 0xFF) * t;
+    return ((r >> 8) << 16) | ((g >> 8) << 8) | (b >> 8);
+}
+
+/* Animated gradient background (dark blue/purple shift) */
+static void draw_animated_bg(void) {
+    uint32_t c1 = 0x0a0e14;
+    uint32_t c2 = 0x12182a;
+    uint32_t c3 = 0x0d1117;
+    int phase = (int)(anim_frame * 2) % 1024;
+    if (phase < 0) phase += 1024;
+    for (int y = 0; y < (int)scr_height; y++) {
+        int t = (y + phase) % 1024;
+        if (t < 512)
+            draw_rect(0, y, (int)scr_width, 1, lerp_color(c1, c2, t * 256 / 512));
+        else
+            draw_rect(0, y, (int)scr_width, 1, lerp_color(c2, c3, (t - 512) * 256 / 512));
+    }
+}
+
+/* Draw string with soft shadow for depth */
+static void draw_string_shadow(int x, int y, const char* str, uint32_t fg) {
+    int len = 0;
+    const char* s = str;
+    while (*s++) len++;
+    for (int dy = 0; dy <= 1; dy++)
+        for (int dx = 0; dx <= 1; dx++)
+            if (dx || dy) {
+                int i = 0;
+                int nx = x + dx;
+                int ny = y + dy;
+                while (str[i]) { draw_char(str[i], nx + i * 8, ny, 0x0a0e14); i++; }
+            }
+    draw_string(str, x, y, fg);
+}
+
 void draw_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
     if (alpha == 255) { draw_rect(x, y, w, h, color); return; }
     if (alpha == 0) return;
+    if (backbuffer == fb) {
+        /* Single-buffer mode: Alpha blending is too slow on old CPUs.
+           Draw solid color instead to avoid flicker/lag. */
+        draw_rect(x, y, w, h, color);
+        return;
+    }
     uint32_t sr = (color >> 16) & 0xFF, sg = (color >> 8) & 0xFF, sb = color & 0xFF;
     for (int i = 0; i < h; i++)
         for (int j = 0; j < w; j++) {
@@ -322,6 +401,34 @@ void draw_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) 
 void draw_rounded_rect_alpha(int x, int y, int w, int h, int r, uint32_t color, uint8_t alpha) {
     (void)r;
     draw_rect_alpha(x, y, w, h, color, alpha);
+}
+
+/* Simple 5-tap blur (used for frosted glass effect) */
+static inline uint32_t blur_pixel(uint32_t a, uint32_t b, uint32_t c,
+                                  uint32_t d, uint32_t e) {
+    uint32_t r = ((a >> 16 & 255) + (b >> 16 & 255) + (c >> 16 & 255) + (d >> 16 & 255) + (e >> 16 & 255)) / 5;
+    uint32_t g = ((a >> 8  & 255) + (b >> 8  & 255) + (c >> 8  & 255) + (d >> 8  & 255) + (e >> 8  & 255)) / 5;
+    uint32_t b2= ((a       & 255) + (b       & 255) + (c       & 255) + (d       & 255) + (e       & 255)) / 5;
+    return (r << 16) | (g << 8) | b2;
+}
+
+static void blur_rect(int x, int y, int w, int h) {
+    if (!backbuffer || backbuffer == fb) return;
+    uint8_t* base = (uint8_t*)backbuffer;
+    for (int j = y + 1; j < y + h - 1; j++) {
+        for (int i = x + 1; i < x + w - 1; i++) {
+            uint32_t offset = j * pitch + i * 4;
+            uint32_t* p = (uint32_t*)(base + offset);
+
+            uint32_t up    = *(uint32_t*)(base + (j - 1) * pitch + i * 4);
+            uint32_t down  = *(uint32_t*)(base + (j + 1) * pitch + i * 4);
+            uint32_t left  = *(uint32_t*)(base + j * pitch + (i - 1) * 4);
+            uint32_t right = *(uint32_t*)(base + j * pitch + (i + 1) * 4);
+            uint32_t mid   = *p;
+
+            *p = blur_pixel(up, down, left, right, mid);
+        }
+    }
 }
 
 void draw_char(char c, int x, int y, uint32_t fg) {
@@ -349,6 +456,7 @@ void itoa(int val, char* buf) {
 
 static void swap_buffers(void) {
     if (!fb || !backbuffer) return;
+    if (backbuffer == fb) return; /* Single-buffer mode: already drawing to visible fb */
     uint32_t dwords = (scr_height * pitch) / 4;
     void* d = fb;
     void* s = backbuffer;
@@ -491,14 +599,6 @@ static int in_rect(int mx, int my, int rx, int ry, int rw, int rh) {
     return mx >= rx && mx < rx + rw && my >= ry && my < ry + rh;
 }
 
-static void draw_button(int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg) {
-    draw_rect(x, y, w, h, bg);
-    draw_rect(x, y, w, 1, 0x888888);
-    int len = 0;
-    const char* s = label;
-    while (*s++) len++;
-    draw_string(label, x + (w - len * 8) / 2, y + (h - 8) / 2, fg);
-}
 
 static int str_len(const char* s) { int i = 0; while (s[i]) i++; return i; }
 
@@ -525,116 +625,221 @@ static void format_size(uint32_t mb, char* out) {
     }
 }
 
-/* ===== UI Rendering ===== */
-static void render(void) {
-    draw_rect(0, 0, scr_width, scr_height, 0x1A1A2E);
+/* ===== Progress-only update (single-buffer mode: avoids full-screen flicker) ===== */
+static int last_drawn_pct = -1;
+static int last_drawn_filled = 0;
 
-    int pw = 600, ph = 420;
+static void render_install_progress_only(void) {
+    if (install_total == 0) return;
+
+    uint32_t pct = install_current * 100 / install_total;
+    if ((int)pct == last_drawn_pct) return;
+
+    int pw = PANEL_W;
     int px = (scr_width - pw) / 2;
-    int py = (scr_height - ph) / 2;
+    int py = (scr_height - PANEL_H) / 2;
+    int bar_x = px + 30;
+    int bar_y = py + 108;
+    int bar_w = pw - 60;
+    int bar_h = 24;
 
-    /* Panel */
-    draw_rect(px + 4, py + 4, pw, ph, 0x0A0A1A); /* shadow */
-    draw_rect(px, py, pw, ph, 0x16213E);
-    draw_rect(px, py, pw, 40, 0x0F3460);
+    int filled = (int)(bar_w * pct / 100);
+    if (filled > bar_w) filled = bar_w;
+
+    if (filled > last_drawn_filled) {
+        draw_rect(bar_x + last_drawn_filled, bar_y, filled - last_drawn_filled, bar_h, 0x00CC44);
+        last_drawn_filled = filled;
+    }
+
+    draw_rect(px + 250, bar_y + bar_h + 15, 100, 10, CONTENT_BG);
+    char pct_str[8];
+    itoa((int)pct, pct_str);
+    int sl = str_len(pct_str);
+    pct_str[sl] = '%'; pct_str[sl + 1] = 0;
+    draw_string(pct_str, px + (pw - str_len(pct_str) * 8) / 2, bar_y + bar_h + 15, 0xFFFFFF);
+
+    last_drawn_pct = (int)pct;
+}
+
+/* ===== UI Rendering ===== */
+static int background_drawn = 0;
+
+static void draw_button_hover(int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg, int hover) {
+    uint32_t use_bg = hover ? TITLEBAR_ACCENT : bg;
+    if (hover && bg != TITLEBAR_ACCENT) {
+        int r = ((use_bg >> 16) & 0xFF) + 20;
+        int g = ((use_bg >> 8) & 0xFF) + 20;
+        int b = (use_bg & 0xFF) + 20;
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+        use_bg = (r << 16) | (g << 8) | b;
+    }
+    draw_rect(x, y, w, h, use_bg);
+    draw_rect(x, y, w, 1, 0x4a5568);
+    int len = 0;
+    const char* s = label;
+    while (*s++) len++;
+    draw_string(label, x + (w - len * 8) / 2, y + (h - 8) / 2, fg);
+}
+
+static void render(void) {
+    if (backbuffer != fb && animations_on) {
+        draw_animated_bg();
+    } else if (backbuffer == fb || !background_drawn) {
+        draw_rect(0, 0, scr_width, scr_height, 0x0d1117);
+        background_drawn = 1;
+    }
+
+    int pw = PANEL_W, ph = PANEL_H;
+    int px = (scr_width - pw) / 2;
+    int py = (scr_height - ph) / 2 + (animations_on ? anim_panel_off_y : 0);
+
+    /* Panel shadow (deeper when sliding, only if animations on) */
+    int shadow_off = 8;
+    if (animations_on && anim_panel_off_y < 0) {
+        shadow_off += -anim_panel_off_y / 4;
+        if (shadow_off > 12) shadow_off = 12;
+    }
+    draw_rect_alpha(px + shadow_off, py + shadow_off, pw, ph, 0x000000, 100);
+
+    /* Panel outer border */
+    draw_rect(px - 1, py - 1, pw + 2, ph + 2, PANEL_BORDER);
+    draw_rect(px, py, pw, 1, 0x3d4451);
+
+    /* Content area */
+    draw_rect(px, py + GLASS_H, pw, ph - GLASS_H, CONTENT_BG);
+
+    /* Titlebar */
+    blur_rect(px, py, pw, GLASS_H);
+    draw_rect_alpha(px, py, pw, GLASS_H, TITLEBAR_BG, 200);
+    draw_rect(px, py + GLASS_H - 2, pw, 2, TITLEBAR_ACCENT);
+
+    /* Titlebar shine (animated sweep, only when animations on) */
+    if (animations_on && backbuffer != fb) {
+        int shine_x = px + ((int)(anim_frame * 5) % (pw + 100)) - 50;
+        if (shine_x < px - 50) shine_x += pw + 100;
+        if (shine_x < px + pw) {
+            int shine_w = 60;
+            if (shine_x + shine_w > px + pw) shine_w = (px + pw) - shine_x;
+            if (shine_w > 0 && shine_x >= px)
+                draw_rect_alpha(shine_x, py + 2, shine_w, GLASS_H - 4, 0xffffff, 35);
+        }
+    }
 
     /* Title */
     const char* title = str_setup_title[current_lang];
-    draw_string(title, px + (pw - str_len(title) * 8) / 2, py + 14, 0xFFFFFF);
-    draw_rect(px, py + 40, pw, 1, 0x1A6FB5);
+    draw_string_shadow(px + (pw - str_len(title) * 8) / 2, py + 16, title, 0xFFFFFF);
 
-    int cy = py + 60;
+    int cy = py + 68;
 
     switch (setup_state) {
     case STATE_WELCOME: {
-        /* Big title */
         const char* main_title = is_beta ? str_welcome_beta[current_lang] : str_welcome_title[current_lang];
-        draw_string(main_title, px + (pw - str_len(main_title) * 8) / 2, cy + 60, 0xFFFFFF);
-        
-        /* Subtitle */
+        draw_string_shadow(px + (pw - str_len(main_title) * 8) / 2, cy + 55, main_title, 0xFFFFFF);
         const char* sub = str_press_next[current_lang];
-        draw_string(sub, px + (pw - str_len(sub) * 8) / 2, cy + 100, 0xAAAAAA);
+        draw_string(sub, px + (pw - str_len(sub) * 8) / 2, cy + 95, 0xAAAAAA);
+        int btn_y = py + ph - 54;
+        draw_button_hover(px + pw - 130, btn_y, 100, 32, str_next[current_lang], TITLEBAR_ACCENT, 0xFFFFFF,
+            in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32));
+        break;
+    }
 
-        int btn_x = px + pw - 130;
-        int btn_y = py + ph - 50;
-        draw_button(btn_x, btn_y, 100, 30, str_next[current_lang], 0x533483, 0xFFFFFF);
+    case STATE_PRESS_INSTALL: {
+        const char* tit = str_setup_title[current_lang];
+        draw_string_shadow(px + (pw - str_len(tit) * 8) / 2, cy + 70, tit, 0xFFFFFF);
+        const char* sub = str_press_to_install[current_lang];
+        draw_string(sub, px + (pw - str_len(sub) * 8) / 2, cy + 110, 0xAAAAAA);
+        /* Animations toggle (click to turn on/off) */
+        int toggle_y = cy + 148;
+        const char* anim_label = animations_on ? str_animations[current_lang] : str_animations_off[current_lang];
+        int tw = str_len(anim_label) * 8 + 24;
+        int tx = px + (pw - tw) / 2;
+        draw_rect(tx, toggle_y, tw, 22, animations_on ? 0x2d3548 : 0x1e2433);
+        draw_rect(tx, toggle_y, tw, 1, 0x4a5568);
+        draw_string(anim_label, tx + 12, toggle_y + 7, animations_on ? 0xAAAAAA : 0x888888);
+        int btn_y = py + ph - 54;
+        draw_button_hover(px + 30, btn_y, 100, 32, str_back[current_lang], 0x2d3548, 0xCCCCCC,
+            in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32));
+        draw_button_hover(px + pw - 130, btn_y, 100, 32, str_next[current_lang], TITLEBAR_ACCENT, 0xFFFFFF,
+            in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32));
         break;
     }
 
     case STATE_LANGUAGE: {
         const char* prompt = str_select_lang[current_lang];
         draw_string(prompt, px + (pw - str_len(prompt) * 8) / 2, cy, 0xCCCCCC);
-        cy += 50;
+        cy += 48;
 
-        /* English button */
-        uint32_t en_bg = (current_lang == LANG_EN) ? 0x0F3460 : 0x1E2D4A;
+        uint32_t en_bg = (current_lang == LANG_EN) ? TITLEBAR_ACCENT : PANEL_BORDER;
         uint32_t en_fg = (current_lang == LANG_EN) ? 0xFFFFFF : 0xAAAAAA;
-        draw_rect(px + 100, cy, pw - 200, 40, en_bg);
-        draw_string("English", px + 100 + (pw - 200 - 7*8)/2, cy + 16, en_fg);
+        draw_rect(px + 80, cy, pw - 160, 44, en_bg);
+        draw_string("English", px + 80 + (pw - 160 - 7*8)/2, cy + 18, en_fg);
+        cy += 52;
 
-        cy += 55;
-
-        /* German button */
-        uint32_t de_bg = (current_lang == LANG_DE) ? 0x0F3460 : 0x1E2D4A;
+        uint32_t de_bg = (current_lang == LANG_DE) ? TITLEBAR_ACCENT : PANEL_BORDER;
         uint32_t de_fg = (current_lang == LANG_DE) ? 0xFFFFFF : 0xAAAAAA;
-        draw_rect(px + 100, cy, pw - 200, 40, de_bg);
-        draw_string("Deutsch", px + 100 + (pw - 200 - 7*8)/2, cy + 16, de_fg);
+        draw_rect(px + 80, cy, pw - 160, 44, de_bg);
+        draw_string("Deutsch", px + 80 + (pw - 160 - 7*8)/2, cy + 18, de_fg);
 
-        int btn_y = py + ph - 50;
-        draw_button(px + 30, btn_y, 100, 30, str_back[current_lang], 0x444444, 0xFFFFFF);
-        draw_button(px + pw - 130, btn_y, 100, 30, str_next[current_lang], 0x533483, 0xFFFFFF);
+        int btn_y = py + ph - 54;
+        draw_button_hover(px + 30, btn_y, 100, 32, str_back[current_lang], 0x2d3548, 0xCCCCCC,
+            in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32));
+        draw_button_hover(px + pw - 130, btn_y, 100, 32, str_next[current_lang], TITLEBAR_ACCENT, 0xFFFFFF,
+            in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32));
         break;
     }
 
     case STATE_SELECT: {
         draw_string(str_select_drive[current_lang], px + 30, cy, 0xCCCCCC);
-        cy += 30;
+        cy += 28;
 
         if (drive_count == 0) {
             draw_string(str_no_drives[current_lang], px + 30, cy, 0xFF6666);
         } else {
             for (int i = 0; i < drive_count && i < 10; i++) {
-                int ey = cy + i * 32;
-                uint32_t bg = (i == selected_drive) ? 0x0F3460 : 0x1E2D4A;
+                int ey = cy + i * 34;
+                uint32_t bg = (i == selected_drive) ? TITLEBAR_ACCENT : PANEL_BORDER;
                 uint32_t fg = (i == selected_drive) ? 0xFFFFFF : 0xAAAAAA;
-                draw_rect(px + 30, ey, pw - 60, 26, bg);
-                /* radio indicator */
-                draw_rect(px + 38, ey + 8, 10, 10, 0x444444);
+                draw_rect(px + 30, ey, pw - 60, 28, bg);
+                draw_rect(px + 38, ey + 10, 10, 10, 0x3d4451);
                 if (i == selected_drive)
-                    draw_rect(px + 40, ey + 10, 6, 6, 0x00AAFF);
-                draw_string(drives[i].name, px + 58, ey + 9, fg);
-
-                /* Show capacity */
+                    draw_rect(px + 41, ey + 13, 4, 4, 0xFFFFFF);
+                draw_string(drives[i].name, px + 58, ey + 10, fg);
                 if (drives[i].size_mb > 0) {
                     char size_str[20];
                     format_size(drives[i].size_mb, size_str);
-                    draw_string(size_str, px + pw - 120, ey + 9, 0x888888);
+                    draw_string(size_str, px + pw - 120, ey + 10, 0x888888);
                 }
             }
         }
 
-        int btn_y = py + ph - 50;
-        draw_button(px + 30, btn_y, 100, 30, str_back[current_lang], 0x444444, 0xFFFFFF);
-        uint32_t bbg = (selected_drive >= 0) ? 0x533483 : 0x333333;
+        int btn_y = py + ph - 54;
+        draw_button_hover(px + 30, btn_y, 100, 32, str_back[current_lang], 0x2d3548, 0xCCCCCC,
+            in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32));
+        uint32_t bbg = (selected_drive >= 0) ? TITLEBAR_ACCENT : 0x3d4451;
         uint32_t bfg = (selected_drive >= 0) ? 0xFFFFFF : 0x666666;
-        draw_button(px + pw - 130, btn_y, 100, 30, str_next[current_lang], bbg, bfg);
+        draw_button_hover(px + pw - 130, btn_y, 100, 32, str_next[current_lang], bbg, bfg,
+            in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32));
         break;
     }
 
     case STATE_CONFIRM: {
         draw_string(str_are_you_sure[current_lang], px + 30, cy, 0xFFFFFF);
-        cy += 35;
+        cy += 32;
         draw_string(str_all_data_on[current_lang], px + 30, cy, 0xCCCCCC);
         cy += 22;
-        draw_string(drives[selected_drive].name, px + 50, cy, 0x00AAFF);
-        cy += 30;
+        draw_string(drives[selected_drive].name, px + 50, cy, 0x5b9cff);
+        cy += 28;
         draw_string(str_will_be_erased[current_lang], px + 30, cy, 0xFF8888);
         cy += 18;
-        draw_string(str_cannot_undo[current_lang], px + 30, cy, 0xFF8888);
+        draw_string(str_cannot_undo[current_lang], px + 30, cy, 0xAA6666);
 
-        int btn_y = py + ph - 50;
-        draw_button(px + 30, btn_y, 120, 30, str_back[current_lang], 0x444444, 0xFFFFFF);
-        draw_button(px + pw - 150, btn_y, 120, 30, str_install[current_lang], 0xCC3333, 0xFFFFFF);
+        int btn_y = py + ph - 54;
+        draw_button_hover(px + 30, btn_y, 110, 32, str_back[current_lang], 0x2d3548, 0xCCCCCC,
+            in_rect(mouse_x, mouse_y, px + 30, btn_y, 110, 32));
+        draw_button_hover(px + pw - 140, btn_y, 110, 32, str_install[current_lang], 0xdc3545, 0xFFFFFF,
+            in_rect(mouse_x, mouse_y, px + pw - 140, btn_y, 110, 32));
         break;
     }
 
@@ -679,13 +884,17 @@ static void render(void) {
     }
 
     case STATE_DONE: {
-        draw_string(str_complete[current_lang], px + 30, cy, 0x00FF88);
-        cy += 35;
+        draw_string(str_complete[current_lang], px + 30, cy, 0x22c55e);
+        cy += 34;
         draw_string(str_installed_to[current_lang], px + 30, cy, 0xCCCCCC);
         cy += 22;
-        draw_string(drives[selected_drive].name, px + 50, cy, 0x00AAFF);
-        cy += 40;
-        draw_string(str_restarting[current_lang], px + 30, cy, 0xFFFFFF);
+        draw_string(drives[selected_drive].name, px + 50, cy, 0x5b9cff);
+        cy += 38;
+        draw_string(str_restart_prompt[current_lang], px + 30, cy, 0xAAAAAA);
+        int btn_y = py + ph - 54;
+        int rx = px + (pw - 120) / 2;
+        draw_button_hover(rx, btn_y, 120, 32, str_restart[current_lang], TITLEBAR_ACCENT, 0xFFFFFF,
+            in_rect(mouse_x, mouse_y, rx, btn_y, 120, 32));
         break;
     }
 
@@ -697,6 +906,13 @@ static void render(void) {
         draw_string(str_rebuild[current_lang], px + 30, cy, 0xCCCCCC);
         break;
     }
+    }
+
+    /* License footer (GPL v3.0) */
+    {
+        const char* lic = str_license[current_lang];
+        int ly = py + ph - 68;
+        draw_string(lic, px + (pw - str_len(lic) * 8) / 2, ly, LICENSE_COLOR);
     }
 
     /* Beta watermark */
@@ -712,84 +928,120 @@ static void render(void) {
 
 /* ===== Click Handling ===== */
 static void handle_click(void) {
-    int pw = 600, ph = 420;
+    int pw = PANEL_W, ph = PANEL_H;
     int px = (scr_width - pw) / 2;
     int py = (scr_height - ph) / 2;
 
     switch (setup_state) {
     case STATE_WELCOME: {
-        int btn_x = px + pw - 130;
-        int btn_y = py + ph - 50;
-        if (in_rect(mouse_x, mouse_y, btn_x, btn_y, 100, 30)) {
+        int btn_y = py + ph - 54;
+        if (in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32)) {
+            setup_state = STATE_PRESS_INSTALL;
+            background_drawn = 0;
+            force_render_frame = 1;
+        }
+        break;
+    }
+
+    case STATE_PRESS_INSTALL: {
+        int toggle_y = py + 68 + 148;
+        int tw = 200;
+        int tx = px + (pw - tw) / 2;
+        if (in_rect(mouse_x, mouse_y, tx, toggle_y, tw, 22)) {
+            animations_on = !animations_on;
+            background_drawn = 0;
+            force_render_frame = 1;
+            return;
+        }
+        int btn_y = py + ph - 54;
+        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32)) {
+            setup_state = STATE_WELCOME;
+            background_drawn = 0;
+            force_render_frame = 1;
+        }
+        if (in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32)) {
             setup_state = STATE_LANGUAGE;
+            background_drawn = 0;
             force_render_frame = 1;
         }
         break;
     }
 
     case STATE_LANGUAGE: {
-        int cy = py + 60 + 50;
-        /* English button */
-        if (in_rect(mouse_x, mouse_y, px + 100, cy, pw - 200, 40)) {
+        int cy = py + 68 + 48;
+        if (in_rect(mouse_x, mouse_y, px + 80, cy, pw - 160, 44)) {
             current_lang = LANG_EN;
+            background_drawn = 0;
             force_render_frame = 1;
             return;
         }
-        cy += 55;
-        /* German button */
-        if (in_rect(mouse_x, mouse_y, px + 100, cy, pw - 200, 40)) {
+        cy += 52;
+        if (in_rect(mouse_x, mouse_y, px + 80, cy, pw - 160, 44)) {
             current_lang = LANG_DE;
+            background_drawn = 0;
             force_render_frame = 1;
             return;
         }
-
-        int btn_y = py + ph - 50;
-        /* Back */
-        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 30)) {
-            setup_state = STATE_WELCOME;
+        int btn_y = py + ph - 54;
+        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32)) {
+            setup_state = STATE_PRESS_INSTALL;
+            background_drawn = 0;
             force_render_frame = 1;
         }
-        /* Next */
-        if (in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 30)) {
+        if (in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32)) {
             setup_state = STATE_SELECT;
+            background_drawn = 0;
             force_render_frame = 1;
         }
         break;
     }
 
     case STATE_SELECT: {
-        int cy = py + 60 + 30;
+        int cy = py + 68 + 28;
         for (int i = 0; i < drive_count && i < 10; i++) {
-            int ey = cy + i * 32;
-            if (in_rect(mouse_x, mouse_y, px + 30, ey, pw - 60, 26)) {
+            int ey = cy + i * 34;
+            if (in_rect(mouse_x, mouse_y, px + 30, ey, pw - 60, 28)) {
                 selected_drive = i;
+                background_drawn = 0;
                 force_render_frame = 1;
                 return;
             }
         }
-        int btn_y = py + ph - 50;
-        /* Back */
-        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 30)) {
+        int btn_y = py + ph - 54;
+        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 100, 32)) {
             setup_state = STATE_LANGUAGE;
+            background_drawn = 0;
             force_render_frame = 1;
         }
-        /* Next */
-        if (selected_drive >= 0 && in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 30)) {
+        if (selected_drive >= 0 && in_rect(mouse_x, mouse_y, px + pw - 130, btn_y, 100, 32)) {
             setup_state = STATE_CONFIRM;
+            background_drawn = 0;
             force_render_frame = 1;
         }
         break;
     }
 
     case STATE_CONFIRM: {
-        int btn_y = py + ph - 50;
-        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 120, 30)) {
+        int btn_y = py + ph - 54;
+        if (in_rect(mouse_x, mouse_y, px + 30, btn_y, 110, 32)) {
             setup_state = STATE_SELECT;
+            background_drawn = 0;
             force_render_frame = 1;
         }
-        if (in_rect(mouse_x, mouse_y, px + pw - 150, btn_y, 120, 30)) {
+        if (in_rect(mouse_x, mouse_y, px + pw - 140, btn_y, 110, 32)) {
             setup_state = STATE_INSTALLING;
+            background_drawn = 0;
             force_render_frame = 1;
+        }
+        break;
+    }
+
+    case STATE_DONE: {
+        int btn_y = py + ph - 54;
+        int btn_w = 120;
+        int btn_x = px + (pw - btn_w) / 2;
+        if (in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, 32)) {
+            reboot();
         }
         break;
     }
@@ -797,66 +1049,84 @@ static void handle_click(void) {
 }
 
 /* ===== Installation Logic ===== */
-static uint8_t last_sector_buf[512];
+static uint8_t sector_buf[512];
+static uint8_t chunk_buf[65536]; // 64KB buffer
+
+static int install_started = 0;
+static uint32_t install_next_lba = 0;
+static int install_target = 0;
 
 static void do_install(void) {
-    if (!img_data || img_size == 0) {
+    if (!use_cdfs || cdfs_image_size == 0) {
         setup_state = STATE_ERROR;
         return;
     }
 
-    install_total = (img_size + 511) / 512;
-    install_current = 0;
-
-    int target = drives[selected_drive].id;
-    uint32_t chunk_size = 128; // 64KB at a time
-
-    for (uint32_t lba = 0; lba < install_total; lba += chunk_size) {
-        if (lba + chunk_size > install_total)
-            chunk_size = install_total - lba;
-
-        const uint8_t* src = &img_data[lba * 512];
-
-        /* Handle padding for the very last chunk if it's partial and doesn't align to 512 */
-        /* Actually img_data is a module in memory, so we can just write the sectors. */
-        /* If the last sector of the image is partial, disk_write_sectors will handle it if we pad it. */
-        
-        if (lba + chunk_size == install_total && (img_size & 511)) {
-            // Very last sector might need padding
-            for (uint32_t i = 0; i < chunk_size - 1; i++) {
-                disk_write_sector((uint8_t)target, lba + i, src + (i * 512));
-            }
-            // Final sector
-            for (int i = 0; i < 512; i++) last_sector_buf[i] = 0;
-            uint32_t remaining = img_size - (install_total - 1) * 512;
-            const uint8_t* last_src = &img_data[(install_total - 1) * 512];
-            for (uint32_t i = 0; i < remaining; i++) last_sector_buf[i] = last_src[i];
-            disk_write_sector((uint8_t)target, install_total - 1, last_sector_buf);
-        } else {
-            disk_write_sectors((uint8_t)target, lba, chunk_size, src);
-        }
-
-        install_current = lba + chunk_size;
-
-        if ((lba % 512) == 0 || install_current >= install_total) {
-            poll_mouse();
-            render();
-        }
+    if (!install_started) {
+        install_total = (cdfs_image_size + 511) / 512;
+        install_current = 0;
+        install_next_lba = 0;
+        install_target = drives[selected_drive].id;
+        install_started = 1;
+        last_drawn_pct = -1;
+        last_drawn_filled = 0;
     }
 
-    disk_flush((uint8_t)target);
-
-    /* Clear OS image from RAM to free memory before reboot */
-    if (img_data && img_size > 0) {
-        uint32_t dwords = img_size / 4;
-        uint32_t* p = (uint32_t*)img_data;
-        for (uint32_t i = 0; i < dwords; i++) p[i] = 0;
-        for (uint32_t i = dwords * 4; i < img_size; i++) img_data[i] = 0;
-        img_data = NULL;
-        img_size = 0;
+    if (install_next_lba >= install_total) {
+        disk_flush((uint8_t)install_target);
+        setup_state = STATE_DONE;
+        background_drawn = 0;
+        force_render_frame = 1;
+        install_started = 0;
+        return;
     }
 
-    setup_state = STATE_DONE;
+    uint32_t lba = install_next_lba;
+    uint32_t chunk_size = 128; // 128 sectors = 64KB at a time
+    if (lba + chunk_size > install_total)
+        chunk_size = install_total - lba;
+
+    uint32_t byte_offset = lba * 512;
+    uint32_t bytes_to_read = chunk_size * 512;
+
+    if (cdfs_read_file_chunk(cdfs_image_lba, byte_offset, chunk_buf, bytes_to_read) != 0) {
+        setup_state = STATE_ERROR;
+        background_drawn = 0;
+        install_started = 0;
+        return;
+    }
+
+    if (lba + chunk_size == install_total && (cdfs_image_size & 511)) {
+        for (uint32_t i = 0; i < chunk_size - 1; i++)
+            disk_write_sector((uint8_t)install_target, lba + i, chunk_buf + (i * 512));
+        for (int i = 0; i < 512; i++) sector_buf[i] = 0;
+        uint32_t remaining = cdfs_image_size - (install_total - 1) * 512;
+        const uint8_t* last_src = chunk_buf + ((chunk_size - 1) * 512);
+        for (uint32_t i = 0; i < remaining; i++) sector_buf[i] = last_src[i];
+        disk_write_sector((uint8_t)install_target, install_total - 1, sector_buf);
+    } else {
+        disk_write_sectors((uint8_t)install_target, lba, chunk_size, chunk_buf);
+    }
+
+    install_current = lba + chunk_size;
+    install_next_lba = install_current;
+
+    uint32_t new_pct = install_current * 100 / install_total;
+    if ((int)new_pct != last_drawn_pct)
+        force_render_frame = 1;
+}
+
+/* Returns CPU family (4=486, 5=Pentium, ...). Returns 0 if CPUID not supported. */
+static int cpu_family(void) {
+    uint32_t id_orig, id_after;
+    asm volatile("pushfl; popl %0" : "=r"(id_orig));
+    asm volatile("pushl %0; popfl" : : "r"(id_orig ^ 0x200000));
+    asm volatile("pushfl; popl %0" : "=r"(id_after));
+    asm volatile("pushl %0; popfl" : : "r"(id_orig));
+    if ((id_orig ^ id_after) == 0) return 0; /* CPUID not supported (e.g. 486) */
+    uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+    return (int)((eax >> 8) & 0xF);
 }
 
 /* ===== Entry Point ===== */
@@ -867,41 +1137,7 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
     idt_install();
     mouse_install();
 
-    /* Parse modules before AHCI init (AHCI uses memory at 0x600000) */
-    uint32_t mod_src = 0, mod_len = 0;
-    uint32_t highest_mod_end = 0x400000;
-
-    if (mbd->flags & (1 << 3)) {
-        if (mbd->mods_count > 0) {
-            struct multiboot_mod_list* mods = (struct multiboot_mod_list*)mbd->mods_addr;
-            for (uint32_t i = 0; i < mbd->mods_count; i++) {
-                if (mods[i].mod_end > highest_mod_end)
-                    highest_mod_end = mods[i].mod_end;
-            }
-            mod_src = mods[0].mod_start;
-            mod_len = mods[0].mod_end - mods[0].mod_start;
-        }
-    }
-
-    /*
-     * Copy the OS image to safe memory above all modules so AHCI init
-     * (which uses 0x600000) doesn't corrupt it.
-     */
-    uint32_t copy_addr = (highest_mod_end + 0xFFF) & ~0xFFF;
-    if (mod_len > 0) {
-        uint8_t* dst = (uint8_t*)copy_addr;
-        uint8_t* src_ptr = (uint8_t*)mod_src;
-        uint32_t dwords = mod_len / 4;
-        void* d = dst;
-        void* s = src_ptr;
-        asm volatile("rep movsl" : "+D"(d), "+S"(s), "+c"(dwords) : : "memory");
-        for (uint32_t i = dwords * 4; i < mod_len; i++) dst[i] = src_ptr[i];
-        img_data = dst;
-        img_size = mod_len;
-    }
-
-    ahci_init();
-
+    uint32_t total_mem = 0;
     /* Framebuffer setup */
     if (mbd->flags & (1 << 12)) {
         fb = (uint32_t*)(uint32_t)mbd->framebuffer_addr;
@@ -910,18 +1146,21 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
         pitch = mbd->framebuffer_pitch;
         bpp = mbd->framebuffer_bpp;
 
-        uint32_t total_mem = 0;
         if (mbd->flags & 1) total_mem = (mbd->mem_upper + 1024) * 1024;
         else total_mem = 16 * 1024 * 1024;
 
         uint32_t bb_size = scr_height * pitch;
-        uint32_t bb_start = ((copy_addr + mod_len + 0x10000) + 0xFFF) & ~0xFFF;
+        uint32_t bb_start = (0x400000 + 0x10000 + 0xFFF) & ~0xFFF;
 
         if (bb_start + bb_size <= total_mem)
             backbuffer = (uint32_t*)bb_start;
         else
             backbuffer = fb;
     }
+    /* Enable animations if RAM >= 64MB and CPU is Pentium or newer */
+    if (total_mem >= 64 * 1024 * 1024 && cpu_family() >= 5)
+        animations_enabled = 1;
+    animations_on = animations_enabled;
 
     if (!fb) {
         uint16_t* vga = (uint16_t*)0xB8000;
@@ -930,7 +1169,19 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
         while (1) asm("hlt");
     }
 
-    if (!img_data || img_size == 0)
+    ahci_init();
+
+    /* Try to init CDFS and find bananaos.img on CD */
+    if (cdfs_init() == 0) {
+        if (cdfs_find_file("BANANAOS.IMG", &cdfs_image_lba, &cdfs_image_size) == 0 ||
+            cdfs_find_file("bananaos.img", &cdfs_image_lba, &cdfs_image_size) == 0 ||
+            cdfs_find_file("BANANAO.IMG", &cdfs_image_lba, &cdfs_image_size) == 0 ||
+            cdfs_find_file("BANANAOS", &cdfs_image_lba, &cdfs_image_size) == 0) {
+            use_cdfs = 1;
+        }
+    }
+
+    if (!use_cdfs)
         setup_state = STATE_ERROR;
 
     detect_drives();
@@ -945,36 +1196,50 @@ void kernel_main(uint32_t magic, struct multiboot_info* mbd) {
 
         if (setup_state == STATE_INSTALLING) {
             do_install();
-            force_render_frame = 1;
-        }
-
-        if (setup_state == STATE_DONE) {
-            render();
-            
-            /* Wait for user to see the completion message */
-            for (volatile int i = 0; i < 50000000; i++);
-            
-            /* Clear backbuffer to reduce memory pressure on reboot */
-            if (backbuffer && backbuffer != fb) {
-                uint32_t bb_dwords = (scr_height * pitch) / 4;
-                for (uint32_t i = 0; i < bb_dwords; i++)
-                    ((uint32_t*)backbuffer)[i] = 0;
-            }
-            
-            /* Small delay to ensure all writes complete */
-            for (volatile int i = 0; i < 10000000; i++);
-            
-            reboot();
         }
 
         if (force_render_frame) {
-            render();
+            static int install_screen_drawn = 0;
+            if (setup_state == STATE_INSTALLING && backbuffer == fb) {
+                if (!install_screen_drawn) {
+                    render();
+                    install_screen_drawn = 1;
+                } else {
+                    render_install_progress_only();
+                    swap_buffers();
+                    draw_cursor(mouse_x, mouse_y);
+                    last_mx = mouse_x;
+                    last_my = mouse_y;
+                }
+            } else {
+                render();
+                if (setup_state != STATE_INSTALLING) install_screen_drawn = 0;
+            }
             force_render_frame = 0;
         } else if (mouse_x != last_mx || mouse_y != last_my) {
             restore_cursor_fb(last_mx, last_my);
             draw_cursor(mouse_x, mouse_y);
             last_mx = mouse_x;
             last_my = mouse_y;
+            if (backbuffer != fb) force_render_frame = 1;
+        }
+
+        anim_frame++;
+        if (animations_on) {
+            if (anim_prev_state != setup_state) {
+                anim_prev_state = setup_state;
+                anim_panel_off_y = -44;
+            }
+            if (anim_panel_off_y < 0) {
+                anim_panel_off_y += 4;
+                if (anim_panel_off_y > 0) anim_panel_off_y = 0;
+                force_render_frame = 1;
+            }
+            if (backbuffer != fb)
+                force_render_frame = 1;
+        } else {
+            anim_prev_state = setup_state;
+            anim_panel_off_y = 0;
         }
 
         while (inb(0x3DA) & 0x08);

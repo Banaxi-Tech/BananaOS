@@ -10,13 +10,13 @@ LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 DRIVER_OBJS = drivers/mouse.o drivers/disk.o drivers/fat16.o drivers/fat32.o drivers/pci.o drivers/ahci.o drivers/net.o
 
 # App object files
-APP_OBJS = apps/calc.o apps/notepad.o apps/settings.o apps/explorer.o apps/dialog.o apps/terminal.o apps/browser.o apps/loader.o
+APP_OBJS = apps/calc.o apps/notepad.o apps/settings.o apps/explorer.o apps/dialog.o apps/terminal.o apps/browser.o apps/loader.o apps/paint.o
 
 # Main OS object files
 OBJS = boot.o kernel.o $(DRIVER_OBJS) $(APP_OBJS)
 
 # Setup object files
-SETUP_OBJS = boot.o setup/setup.o drivers/mouse.o drivers/disk.o drivers/pci.o drivers/ahci.o
+SETUP_OBJS = boot.o setup/setup.o drivers/mouse.o drivers/disk.o drivers/pci.o drivers/ahci.o drivers/cdfs.o
 
 all: bananaos.img
 
@@ -59,12 +59,11 @@ setup.bin: $(SETUP_OBJS) linker.ld
 buildSetup: bananaos.img setup.bin
 	mkdir -p setupdir/boot/grub
 	cp setup.bin setupdir/boot/setup.bin
-	cp bananaos.img setupdir/boot/bananaos.img
+	cp bananaos.img setupdir/bananaos.img
 	echo 'set timeout=5' > setupdir/boot/grub/grub.cfg
 	echo 'set default=0' >> setupdir/boot/grub/grub.cfg
 	echo 'menuentry "BananaOS Setup" {' >> setupdir/boot/grub/grub.cfg
 	echo '	multiboot /boot/setup.bin' >> setupdir/boot/grub/grub.cfg
-	echo '	module /boot/bananaos.img' >> setupdir/boot/grub/grub.cfg
 	echo '	boot' >> setupdir/boot/grub/grub.cfg
 	echo '}' >> setupdir/boot/grub/grub.cfg
 	grub-mkrescue -o setup.iso setupdir

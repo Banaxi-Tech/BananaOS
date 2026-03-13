@@ -6,6 +6,7 @@ int current_theme = 0; // 0 = Dark, 1 = Light
 int settings_page = 0; // 0 = Personalization, 1 = About
 int rounded_dock = 1; // 1 = Rounded, 0 = Square
 int rounded_win = 1;  // 1 = Rounded, 0 = Square
+int frosted_glass = 0; // Windows 7 style
 uint32_t total_ram_mb = 0;
 char cpu_brand[49] = "Detecting...";
 
@@ -91,6 +92,15 @@ void draw_settings() {
         uint32_t wsbtnc = (rounded_win == 0) ? 0xFF9F0A : 0x505050;
         draw_rect(content_x + 110, set_y + 185, 100, 30, wsbtnc);
         draw_string("Square", content_x + 136, set_y + 195, 0xFFFFFF);
+
+        draw_string("Frosted Glass", content_x, set_y + 225, txt_col);
+        uint32_t fgonc = (frosted_glass == 1) ? 0xFF9F0A : 0x505050;
+        draw_rect(content_x, set_y + 245, 100, 30, fgonc);
+        draw_string("On", content_x + 40, set_y + 255, 0xFFFFFF);
+
+        uint32_t fgoffc = (frosted_glass == 0) ? 0xFF9F0A : 0x505050;
+        draw_rect(content_x + 110, set_y + 245, 100, 30, fgoffc);
+        draw_string("Off", content_x + 145, set_y + 255, 0xFFFFFF);
         
     } else if (settings_page == 1) {
         draw_string("About This System", content_x, set_y + 40, 0xFF9F0A);

@@ -54,12 +54,19 @@ void draw_explorer();
 void explorer_init(uint8_t drive);
 void explorer_open_file(int index);
 
+// Paint
+extern Window win_paint;
+void draw_paint();
+int paint_handle_click(int mx, int my);
+void paint_handle_mouse(int mx, int my, int is_down);
+
 // Settings
 extern Window win_settings;
 extern int current_theme;
 extern int settings_page;
 extern int rounded_dock;
 extern int rounded_win;
+extern int frosted_glass;
 extern uint32_t total_ram_mb;
 extern char cpu_brand[49];
 void draw_settings();

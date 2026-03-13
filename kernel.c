@@ -392,15 +392,15 @@ uint32_t get_text_color() { return current_theme ? 0x000000 : 0xFFFFFF; }
 
 // --- UI Interaction Logic ---
 int get_dock_hover_index() {
-    int dock_w = 400;
+    int dock_w = 460;
     int dock_h = 60;
     int dock_x = (scr_width - dock_w) / 2;
     int dock_y = scr_height - dock_h - 10;
     int spacing = 60;
     int base_size = 30;
-    int start_x = dock_x + (dock_w - (6*spacing)) / 2 - base_size/2;
+    int start_x = dock_x + (dock_w - (7*spacing)) / 2 - base_size/2;
 
-    for (int i=0; i<6; i++) {
+    for (int i=0; i<7; i++) {
         int bx = start_x + (i * spacing);
         int by = dock_y + 15;
         // Expand hit box gracefully
@@ -418,8 +418,8 @@ void desktop_tick();
 void draw_bex_window();
 
 Window* get_window_at_pos(int x, int y, int titlebar_only) {
-    Window* windows[7] = {&win_terminal, &win_browser, &win_settings, &win_notepad, &win_explorer, &win_calc, &win_bex};
-    for (int i=0; i<7; i++) {
+    Window* windows[8] = {&win_terminal, &win_browser, &win_settings, &win_notepad, &win_explorer, &win_calc, &win_paint, &win_bex};
+    for (int i=0; i<8; i++) {
         Window* w = windows[i];
         if (w->open && !w->minimized) {
             int h = titlebar_only ? 20 : w->h;
@@ -543,6 +543,9 @@ if (mouse_y >= 0 && mouse_y <= 25) {
     if (hover_idx == 5) { 
         win_browser.open = !win_browser.open; win_browser.minimized = 0; force_render_frame = 1; return; 
     }
+    if (hover_idx == 6) { 
+        win_paint.open = !win_paint.open; win_paint.minimized = 0; force_render_frame = 1; return; 
+    }
     
     Window* clicked_win = get_window_at_pos(mouse_x, mouse_y, 0);
 
@@ -589,6 +592,10 @@ if (mouse_y >= 0 && mouse_y <= 25) {
     }
     if (clicked_win) {
         if (handle_window_controls(clicked_win)) {
+            force_render_frame = 1;
+            return;
+        }
+        if (clicked_win == &win_paint && paint_handle_click(mouse_x, mouse_y)) {
             force_render_frame = 1;
             return;
         }
@@ -639,6 +646,13 @@ if (mouse_y >= 0 && mouse_y <= 25) {
                 // Square Toggle Hitbox (Windows)
                 if (mouse_x >= set_x + 250 && mouse_x <= set_x + 350 && mouse_y >= set_y + 185 && mouse_y <= set_y + 215) {
                     rounded_win = 0; force_render_frame = 1; return;
+                }
+                // Frosted Glass Toggle
+                if (mouse_x >= set_x + 140 && mouse_x <= set_x + 240 && mouse_y >= set_y + 245 && mouse_y <= set_y + 275) {
+                    frosted_glass = 1; force_render_frame = 1; return;
+                }
+                if (mouse_x >= set_x + 250 && mouse_x <= set_x + 350 && mouse_y >= set_y + 245 && mouse_y <= set_y + 275) {
+                    frosted_glass = 0; force_render_frame = 1; return;
                 }
             }
         } else if (clicked_win == &win_calc) {
@@ -759,7 +773,7 @@ void restore_cursor(int x, int y) {
     }
 }
 void draw_dock() {
-    int dock_w = 400;
+    int dock_w = 460;
     int dock_h = 60;
     int dock_x = (scr_width - dock_w) / 2;
     int dock_y = scr_height - dock_h - 10;
@@ -779,13 +793,13 @@ void draw_dock() {
     int spacing = 60;
     int base_size = 30;
     int hover_size = 46;
-    int start_x = dock_x + (dock_w - (6*spacing)) / 2 - base_size/2;
+    int start_x = dock_x + (dock_w - (7*spacing)) / 2 - base_size/2;
 
-    uint32_t colors[6] = {0x000000, 0xFF9F0A, 0xFFFFFF, 0x5856D6, 0x8E8E93, 0x5AC8FA};
-    const char* labels[6] = {"T", "C", "N", "E", "S", "B"};
+    uint32_t colors[7] = {0x000000, 0xFF9F0A, 0xFFFFFF, 0x5856D6, 0x8E8E93, 0x5AC8FA, 0xFF6B6B};
+    const char* labels[7] = {"T", "C", "N", "E", "S", "B", "P"};
     int hover_idx = get_dock_hover_index();
 
-    for (int i=0; i<6; i++) {
+    for (int i=0; i<7; i++) {
         int size = base_size;
         int y_offset = 0;
         int bx = start_x + (i * spacing);
@@ -812,14 +826,16 @@ static inline uint32_t blur_pixel(uint32_t a, uint32_t b, uint32_t c,
 }
 
 void blur_rect(int x, int y, int w, int h) {
+    uint8_t* base = (uint8_t*)backbuffer;
     for (int j = y+1; j < y+h-1; j++) {
         for (int i = x+1; i < x+w-1; i++) {
-            uint32_t* p = (uint32_t*)(backbuffer + j*pitch + i*4);
+            uint32_t offset = j * pitch + i * 4;
+            uint32_t* p = (uint32_t*)(base + offset);
 
-            uint32_t up    = *(uint32_t*)(backbuffer + (j-1)*pitch + i*4);
-            uint32_t down  = *(uint32_t*)(backbuffer + (j+1)*pitch + i*4);
-            uint32_t left  = *(uint32_t*)(backbuffer + j*pitch + (i-1)*4);
-            uint32_t right = *(uint32_t*)(backbuffer + j*pitch + (i+1)*4);
+            uint32_t up    = *(uint32_t*)(base + (j-1)*pitch + i*4);
+            uint32_t down  = *(uint32_t*)(base + (j+1)*pitch + i*4);
+            uint32_t left  = *(uint32_t*)(base + j*pitch + (i-1)*4);
+            uint32_t right = *(uint32_t*)(base + j*pitch + (i+1)*4);
             uint32_t mid   = *p;
 
             *p = blur_pixel(up, down, left, right, mid);
@@ -875,19 +891,44 @@ void draw_topbar() {
 void draw_window_frame(Window* win) {
     if (!win->open || win->minimized) return;
 
-    if (rounded_win) {
-        // Shadow / Glow
-        draw_rounded_rect_alpha(win->x + 5, win->y + 5, win->w, win->h, 15, 0x1A1C23, 100);
-        // Background
-        draw_rounded_rect_alpha(win->x, win->y, win->w, win->h, 15, get_window_color(), 255);
-        // Title bar
-        draw_rounded_rect_alpha(win->x, win->y, win->w, 20, 15, 0x333333, 255);
-        // Straight bottom for the title bar if needed, but 15px radius at top is enough
-        draw_rect(win->x, win->y + 10, win->w, 10, 0x333333);
+    if (frosted_glass) {
+        // Windows 7 Aero / Frosted Glass Style
+        const int glass_h = 26;
+        if (rounded_win) {
+            // Shadow / Glow
+            draw_rounded_rect_alpha(win->x + 5, win->y + 5, win->w, win->h, 15, 0x1A1C23, 100);
+            
+            // Background blur (approximate by blurring what is under)
+            blur_rect(win->x, win->y, win->w, glass_h);
+            
+            // Glassy titlebar
+            draw_rounded_rect_alpha(win->x, win->y, win->w, glass_h, 15, 0xFFFFFF, 90);
+
+            // Window content background
+            draw_rounded_rect_alpha(win->x, win->y + glass_h, win->w, win->h - glass_h, 0, get_window_color(), 255);
+        } else {
+            // Square glass
+            draw_rect(win->x + 5, win->y + 5, win->w, win->h, 0x1A1C23);
+            blur_rect(win->x, win->y, win->w, glass_h);
+            draw_rect_alpha(win->x, win->y, win->w, glass_h, 0xFFFFFF, 90);
+            draw_rect(win->x, win->y + glass_h, win->w, win->h - glass_h, get_window_color());
+        }
     } else {
-        draw_rect(win->x + 5, win->y + 5, win->w, win->h, 0x1A1C23); 
-        draw_rect(win->x, win->y, win->w, win->h, get_window_color()); 
-        draw_rect(win->x, win->y, win->w, 20, 0x333333);   
+        // Original rendering logic
+        if (rounded_win) {
+            // Shadow / Glow
+            draw_rounded_rect_alpha(win->x + 5, win->y + 5, win->w, win->h, 15, 0x1A1C23, 100);
+            // Background
+            draw_rounded_rect_alpha(win->x, win->y, win->w, win->h, 15, get_window_color(), 255);
+            // Title bar
+            draw_rounded_rect_alpha(win->x, win->y, win->w, 20, 15, 0x333333, 255);
+            // Straight bottom for the title bar if needed, but 15px radius at top is enough
+            draw_rect(win->x, win->y + 10, win->w, 10, 0x333333);
+        } else {
+            draw_rect(win->x + 5, win->y + 5, win->w, win->h, 0x1A1C23); 
+            draw_rect(win->x, win->y, win->w, win->h, get_window_color()); 
+            draw_rect(win->x, win->y, win->w, 20, 0x333333);   
+        }
     }
     
     // Control Buttons
@@ -895,7 +936,8 @@ void draw_window_frame(Window* win) {
     draw_rect(win->x + 25, win->y + 5, 10, 10, 0xFFBD2E); // Minimize
     draw_rect(win->x + 40, win->y + 5, 10, 10, 0x27C93F); // Maximize
     
-    draw_string(win->title, win->x + 60, win->y + 6, 0xFFFFFF);
+    // For glass mode, use black text on the white-ish glass titlebar
+    draw_string(win->title, win->x + 60, win->y + 6, frosted_glass ? 0x000000 : 0xFFFFFF);
 }
 
 // draw_notepad, draw_calculator, draw_settings moved to separate files
@@ -1292,6 +1334,10 @@ void desktop_tick() {
         last_hover_idx = current_hover_idx;
     }
 
+    if (win_paint.open && !win_paint.minimized && mouse_down &&
+        get_window_at_pos(mouse_x, mouse_y, 0) == &win_paint) {
+        paint_handle_mouse(mouse_x, mouse_y, 1);
+    }
     if (mouse_clicked) {
         if (get_window_at_pos(mouse_x, mouse_y, 0) == &win_bex) {
             bex_window_clicked = 1;
@@ -1318,13 +1364,19 @@ void desktop_tick() {
     if (force_render_frame) {
         // Full 8MB rendering pipeline triggered by UI changes
         draw_wallpaper(); 
+        
+        // Z-Order: Render windows from back to front
+        // In the future, a dynamic list would be better, but for now we follow this fixed order
+        // (Note: This is the same order as your original code, which is effectively the draw order)
         draw_calculator();
         draw_explorer();
         draw_notepad();
+        draw_paint();
         draw_settings();
         draw_browser();
         draw_terminal();
         draw_bex_window();
+        
         draw_dialog();
         draw_dock(); 
         draw_topbar();

@@ -123,9 +123,11 @@ typedef struct {
     uint8_t  rsv1[4];   // Reserved
 } FIS_REG_H2D;
 
-void ahci_init();
+void ahci_init(void);
 int ahci_read(int port, uint32_t lba, uint32_t count, uint16_t* buffer);
 int ahci_write(int port, uint32_t lba, uint32_t count, const uint16_t* buffer);
 int ahci_drive_exists(int port);
+int ahci_get_satapi_port(void);
+int ahci_satapi_read_sector(int port, uint32_t lba, uint8_t* buffer);
 
 #endif
