@@ -42,20 +42,21 @@ BananaOS is a hobby operating system designed for learning and exploring low-lev
 | **VRAM** | 1 MB | 8 MB |
 | **Boot** | BIOS | BIOS |
 
-> **Note:** The Setup ISO requires at least **48 MB RAM** to boot. For systems with less RAM, use the portable image directly.
+> **Note:** Since the latest update the setup iso can also boot on 4MB RAM
 
 ## Features
 *   **Multiboot Compliant Kernel**: Loaded by GRUB, providing essential system services.
-*   ** Newly Added Network Supprot**
+*   ** Newly Added Network Support**
 *   **VESA Framebuffer Graphics**:
+*   **Frosted Glass**: Optional Effect for Powerful hardware for transparent titlebars.
     *   High-resolution graphical output (default 1024x768, configurable via Multiboot).
     *   Double buffering for smooth animations and UI rendering.
     *   Basic graphics primitives: pixel, rectangle, rounded rectangle drawing with alpha blending.
     *   BMP wallpaper support (loaded as a Multiboot module).
 *   **Graphical User Interface (GUI)**:
-    *   **Window Manager**: Features movable, resizable (maximize/minimize), and closeable Windoof.
+    *   **Window Manager**: Features movable, resizable (maximize/minimize), and closeable Windows.
     *   **Application Dock**: A central launcher for integrated applications, with hover animations.
-    *   **Theming**: Supports light/dark modes, and customizable rounded or square styles for Windoof and the dock.
+    *   **Theming**: Supports light/dark modes, and customizable rounded or square styles for Windows and the dock.
 *   **Input Handling**:
     *   PS/2 Mouse support for cursor control and UI interaction.
     *   PS/2 Keyboard support with scancode to ASCII conversion and Shift key handling.
@@ -84,7 +85,7 @@ BananaOS is a hobby operating system designed for learning and exploring low-lev
 - **BMP Wallpapers** — Custom background support
 
 ### User Interface
-- **Window Manager** — Draggable, resizable, minimizable Windoof
+- **Window Manager** — Draggable, resizable, minimizable Windows
 - **Application Dock** — Animated launcher bar
 - **Theming** — Light/dark modes, rounded/square styles
 - **Top Bar** — System menu with clock
